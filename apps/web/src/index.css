@@ -1,0 +1,187 @@
+@import "tailwindcss";
+@import "@fontsource-variable/geist";
+@import "@fontsource-variable/geist-mono";
+
+/*
+ * Marlene's design language without its private UI kit: structure from whitespace and surface
+ * tone, no borders or shadows at rest, colour only where it means something.
+ */
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  color-scheme: light;
+  --chrome: oklch(0.978 0 0);
+  --recessed: oklch(0.965 0 0);
+  --surface: oklch(1 0 0);
+  --surface-2: oklch(0.955 0 0);
+  --hover: oklch(0.925 0 0);
+  --foreground: oklch(0.2923 0.01 270);
+  --muted-foreground: oklch(0.5 0.015 268);
+  --accent: oklch(0.535 0.19 255);
+  --accent-foreground: oklch(0.9905 0.0025 265);
+  --accent-text: oklch(0.535 0.19 255);
+  --accent-wash: color-mix(in oklch, var(--accent) 12%, transparent);
+  --success: oklch(0.48 0.11 165);
+  --warning: oklch(0.5 0.12 60);
+  --warning-wash: oklch(0.96 0.045 85);
+  --destructive: oklch(0.52 0.2 37);
+  --destructive-wash: oklch(0.96 0.03 37);
+  --border: color-mix(in oklch, var(--foreground) 12%, transparent);
+  --selection: color-mix(in oklch, var(--accent) 22%, transparent);
+  --radius: 0.7rem;
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.dark {
+  color-scheme: dark;
+  --chrome: oklch(0.17 0 0);
+  --recessed: oklch(0.2 0 0);
+  --surface: oklch(0.23 0 0);
+  --surface-2: oklch(0.28 0 0);
+  --hover: oklch(0.32 0 0);
+  --foreground: oklch(0.875 0.004 255);
+  --muted-foreground: oklch(0.71 0.012 258);
+  --accent: oklch(0.6987 0.15 255);
+  --accent-foreground: oklch(0.24 0.01 260);
+  --accent-text: oklch(0.6987 0.15 255);
+  --success: oklch(0.76 0.13 168);
+  --warning: oklch(0.8 0.12 68);
+  --warning-wash: oklch(0.3 0.05 70);
+  --destructive: oklch(0.73 0.17 37);
+  --destructive-wash: oklch(0.3 0.05 37);
+}
+
+@theme inline {
+  --font-sans: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Geist Mono Variable", ui-monospace, monospace;
+  --text-2xs: 0.6875rem;
+  --text-3xs: 0.625rem;
+
+  --color-chrome: var(--chrome);
+  --color-recessed: var(--recessed);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-hover: var(--hover);
+  --color-foreground: var(--foreground);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent-text: var(--accent-text);
+  --color-accent-wash: var(--accent-wash);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-warning-wash: var(--warning-wash);
+  --color-destructive: var(--destructive);
+  --color-destructive-wash: var(--destructive-wash);
+  --color-border: var(--border);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  --shadow-2xs: 0 0 #0000;
+  --shadow-xs: 0 0 #0000;
+  --shadow-sm: 0 0 #0000;
+  --shadow-md: 0 0 #0000;
+  --shadow-lg: 0 0 #0000;
+  --shadow-xl: 0 0 #0000;
+  --shadow-2xl: 0 0 #0000;
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    background: var(--chrome);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  ::selection {
+    background: var(--selection);
+  }
+
+  :focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px var(--accent-text);
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in oklch, var(--foreground) 16%, transparent) transparent;
+  }
+}
+
+@layer components {
+  /* Content rises 6px and fades in. */
+  .ui-enter-up {
+    animation: ui-enter-up 360ms var(--ease) both;
+  }
+
+  @keyframes ui-enter-up {
+    from {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+  }
+
+  /* In-flight labels shimmer instead of pulsing. */
+  .text-shimmer {
+    background: linear-gradient(
+        90deg,
+        var(--muted-foreground) 0%,
+        var(--foreground) 50%,
+        var(--muted-foreground) 100%
+      )
+      0 0 / 200% 100%;
+    background-clip: text;
+    color: transparent;
+    animation: text-shimmer 1.6s linear infinite;
+  }
+
+  @keyframes text-shimmer {
+    to {
+      background-position: -200% 0;
+    }
+  }
+
+  .skeleton {
+    border-radius: var(--radius-sm);
+    background: var(--surface-2);
+    animation: skeleton 1.4s ease-in-out infinite;
+  }
+
+  @keyframes skeleton {
+    50% {
+      opacity: 0.5;
+    }
+  }
+
+  /* Matched text uses the same pale accent tint as the selection. */
+  mark {
+    background: var(--selection);
+    color: inherit;
+    border-radius: 3px;
+    padding: 0 1px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .ui-enter-up,
+    .text-shimmer,
+    .skeleton {
+      animation: none;
+    }
+
+    .text-shimmer {
+      color: var(--muted-foreground);
+    }
+  }
+}

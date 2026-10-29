@@ -1,0 +1,18 @@
+{
+  "documents": [
+    {
+      "id": "D2",
+      "title": "Ambulanter Patientenbrief",
+      "date": "2020-04-05",
+      "type": "Ambulanzbrief",
+      "department": "Pulmologie"
+    },
+    {
+      "id": "D1",
+      "title": "Stat. Patientenbrief",
+      "date": "2019-06-28",
+      "type": "Arztbrief",
+      "department": "Kardiologie"
+    }
+  ]
+}

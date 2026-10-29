@@ -1,0 +1,28 @@
+{
+  "name": "@track1/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch --env-file-if-exists=../../.env src/index.ts",
+    "start": "tsx --env-file-if-exists=../../.env src/index.ts",
+    "eval": "tsx --env-file-if-exists=../../.env scripts/eval.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@earendil-works/chord": "1.4.0",
+    "@earendil-works/pi-ai": "1.4.0",
+    "@earendil-works/pi-durable": "1.4.0",
+    "@fastify/static": "^10.1.4",
+    "@track1/patient-record": "workspace:*",
+    "@track1/shared": "workspace:*",
+    "fastify": "^5.12.7",
+    "tsx": "^4.23.14"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.2",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  }
+}

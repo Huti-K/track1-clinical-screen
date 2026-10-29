@@ -1,0 +1,24 @@
+{
+  "name": "track1-clinical-screen",
+  "private": true,
+  "version": "0.1.0",
+  "description": "One screen with the patient facts a clinician's role and task need, every fact linked to its source passage",
+  "type": "module",
+  "scripts": {
+    "dev": "pnpm --parallel --filter @track1/server --filter @track1/web dev",
+    "build": "pnpm --filter @track1/web build",
+    "start": "pnpm build && pnpm --filter @track1/server start",
+    "eval": "pnpm --filter @track1/server eval",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "lint": "biome check --error-on-warnings .",
+    "lint:fix": "biome check --write .",
+    "check": "biome check --error-on-warnings . && pnpm -r typecheck && pnpm -r test"
+  },
+  "engines": {
+    "node": ">=22.22.3"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.14"
+  }
+}

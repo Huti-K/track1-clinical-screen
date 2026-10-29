@@ -1,0 +1,12 @@
+packages:
+  - apps/*
+  - packages/*
+
+# Only versions published at least a week ago (minutes).
+minimumReleaseAge: 10080
+
+# esbuild fetches its binary; the others' scripts are checks that nothing here needs.
+allowBuilds:
+  esbuild: true
+  "@google/genai": false
+  protobufjs: false
