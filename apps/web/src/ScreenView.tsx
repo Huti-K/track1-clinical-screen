@@ -658,16 +658,15 @@ function DrugRow({
           <TriangleAlert className="size-3.5 text-warning" aria-label="In a contradiction" />
         )}
       </span>
-      <span className="flex min-w-0 items-baseline font-semibold">
-        <span className="truncate">{drug.name}</span>
-        <span className="shrink-0">
-          <Chips kinds={line.checks} advice={line.advice} />
-        </span>
-      </span>
+      <span className="truncate font-semibold">{drug.name}</span>
       <span className="tabular-nums">{drug.dose}</span>
+      {/* The checks follow the route, where the row has room, so they never crowd out the name. */}
       <span className="flex min-w-0 items-center gap-2 overflow-hidden">
         <Slots schedule={drug.schedule} />
         <span className="text-muted-foreground">{route(drug.route)}</span>
+        <span className="shrink-0 -ml-1.5">
+          <Chips kinds={line.checks} advice={line.advice} />
+        </span>
       </span>
       <span className="text-right text-xs text-muted-foreground tabular-nums">
         {line.date ? monthYear(line.date) : ""}
