@@ -1,4 +1,4 @@
-# Track 1: Clinical Screen
+# Track 1: Roter Faden
 
 A clinician types their role and task and gets one screen with the patient facts that task needs. Every fact links to the passage it comes from, gaps say "not documented", and contradictions in the documents are flagged.
 

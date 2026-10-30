@@ -74,7 +74,7 @@ export function LoginPage({
         <div className="flex flex-col gap-4">
           <BrandMark size={40} />
           <div>
-            <h1 className="text-xl font-semibold tracking-tight">Sign in to Clinical screen</h1>
+            <h1 className="text-xl font-semibold tracking-tight">Sign in to Roter Faden</h1>
             <p className="mt-1 text-sm text-muted-foreground">
               {status.subscription
                 ? `Uses your ${status.providerName} account${status.model.startsWith("openai-codex/") ? ", as the Codex CLI does. Codex stays signed in." : "."}`

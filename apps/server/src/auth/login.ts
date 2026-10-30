@@ -132,7 +132,7 @@ export class SubscriptionLogin {
     oauth
       .login(
         { signal: abort.signal, prompt, notify },
-        { getDeviceId: () => installation, agentName: "Clinical screen" },
+        { getDeviceId: () => installation, agentName: "Roter Faden" },
       )
       .then(async (credential) => {
         await this.options.credentials.modify(this.options.model.provider, async () => credential);

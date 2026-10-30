@@ -16,7 +16,7 @@ export function Brand() {
   return (
     <div className="flex items-center gap-2.5">
       <BrandMark />
-      <span className="text-sm font-semibold tracking-tight">Clinical screen</span>
+      <span className="text-sm font-semibold tracking-tight">Roter Faden</span>
     </div>
   );
 }

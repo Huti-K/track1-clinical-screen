@@ -253,7 +253,7 @@ function AboutSettings() {
       <div className="flex items-center gap-3">
         <BrandMark size={40} />
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-medium">Clinical screen</p>
+          <p className="text-sm font-medium">Roter Faden</p>
           <p className="text-xs text-muted-foreground">
             The patient facts your role and task need, each linked to its source.
           </p>

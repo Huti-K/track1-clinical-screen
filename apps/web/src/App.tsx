@@ -247,7 +247,7 @@ function Workspace({ auth, onAuth }: { auth: AuthStatus; onAuth: (auth: AuthStat
   const title = settings ? "Settings" : showResult ? result.screen.task : undefined;
   const patientName = patient?.name;
   useEffect(() => {
-    document.title = [title, patientName, "Clinical screen"].filter(Boolean).join(" · ");
+    document.title = [title, patientName, "Roter Faden"].filter(Boolean).join(" · ");
   }, [title, patientName]);
 
   const toggleSidebar = () =>
