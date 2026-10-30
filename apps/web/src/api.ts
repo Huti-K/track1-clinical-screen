@@ -23,6 +23,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     headers: init?.body ? { "content-type": "application/json" } : undefined,
   });
   const body = (await response.json().catch(() => ({}))) as T | ErrorResponse;
+  init?.signal?.throwIfAborted();
   if (!response.ok)
     throw new ApiError(response.status, (body as ErrorResponse).error ?? response.statusText);
   return body as T;
