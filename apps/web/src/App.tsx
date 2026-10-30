@@ -406,6 +406,7 @@ function Workspace({ auth, onAuth }: { auth: AuthStatus; onAuth: (auth: AuthStat
                     key={result.id}
                     result={result}
                     layout={layout}
+                    letterOpen={!!letter}
                     onOpenLetter={setLetter}
                     onCompare={(c) => {
                       setLetterTarget(undefined);

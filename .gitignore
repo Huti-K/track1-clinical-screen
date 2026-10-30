@@ -2,6 +2,7 @@
 __pycache__/
 node_modules/
 dist/
+*.tsbuildinfo
 .data/
 .env
 output/

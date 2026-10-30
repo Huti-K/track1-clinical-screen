@@ -13,9 +13,12 @@ import { loadDocument } from "./SourcePopover";
 export const PANE =
   "mx-4 mb-8 rounded-2xl bg-recessed px-5 pt-4 pb-5 sm:mx-10 @4xl:m-0 @4xl:h-full @4xl:w-[min(var(--detail-width),50%)] @4xl:shrink-0 @4xl:overflow-y-auto @4xl:rounded-none @4xl:bg-chrome @4xl:px-6 @4xl:pt-8 @4xl:pb-8";
 
-/** On narrow screens a selection opens the pane as a sheet over the list's foot. */
+/**
+ * On narrow screens a selection opens the pane as a sheet over the list's foot. While a document
+ * is open beside the screen the sheet would cover it, so it stays hidden until the document closes.
+ */
 export const SHEET =
-  "ui-enter-up @max-4xl:fixed @max-4xl:inset-x-3 @max-4xl:bottom-3 @max-4xl:z-40 @max-4xl:mx-0 @max-4xl:mb-0 @max-4xl:max-h-[75dvh] @max-4xl:overflow-y-auto @max-4xl:shadow-[0_12px_32px_rgb(0_0_0/0.12)]";
+  "ui-enter-up @max-4xl:group-data-[letter]/screen:hidden @max-4xl:fixed @max-4xl:inset-x-3 @max-4xl:bottom-3 @max-4xl:z-40 @max-4xl:mx-0 @max-4xl:mb-0 @max-4xl:max-h-[75dvh] @max-4xl:overflow-y-auto @max-4xl:shadow-[0_12px_32px_rgb(0_0_0/0.12)]";
 
 export function Field({ label, children }: { label: string; children: ReactNode }) {
   return (

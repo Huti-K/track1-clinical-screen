@@ -20,6 +20,7 @@ import {
   Clock,
   EyeOff,
   FileText,
+  Info,
   MessageCircleQuestionMark,
   NotebookPen,
   ShieldAlert,
@@ -471,7 +472,25 @@ function LineRow({
           line.detail
         )}
         <Chips kinds={line.checks} advice={line.advice} />
-        {line.conflict && <span className="text-warning"> · contradiction</span>}
+        {line.conflict && (
+          <span
+            title=""
+            className="group/conflict relative ml-1.5 inline-flex cursor-help items-center gap-1 rounded-full bg-warning px-1.5 py-px align-[1px] text-3xs font-semibold text-surface uppercase tracking-wide"
+          >
+            <TriangleAlert className="size-3" aria-hidden />
+            Contradiction
+            <span
+              role="tooltip"
+              className="invisible absolute right-0 bottom-full z-30 mb-1.5 w-max max-w-80 rounded-lg bg-surface px-2.5 py-2 text-left text-xs font-normal tracking-normal text-foreground normal-case opacity-0 shadow-[0_12px_32px_rgb(0_0_0/0.08)] ring-1 ring-border transition-opacity duration-150 group-hover/conflict:visible group-hover/conflict:opacity-100"
+            >
+              <span className="block">{line.conflict.summary}</span>
+              <span className="mt-1 block text-muted-foreground">
+                {line.conflict.method === "rule" ? "Calculated check · " : ""}Open the line to
+                compare the passages
+              </span>
+            </span>
+          </span>
+        )}
       </span>
       <span
         className={cx(
@@ -1144,28 +1163,44 @@ function PatientStrip({
   );
 }
 
-/** What the marks on the lines mean, the three kinds of "not there" first. */
+/** What the marks on the lines mean, the three kinds of "not there" first, behind an info button. */
 function Legend() {
-  const mark = (icon: ReactNode, text: string) => (
-    <span className="inline-flex items-center gap-1">
-      {icon}
-      {text}
-    </span>
-  );
+  const marks: [ReactNode, string][] = [
+    [<CircleDashed key="nd" className="size-3" aria-hidden />, "n.d.: in no document"],
+    [<CircleSlash key="absent" className="size-3" aria-hidden />, "documented as absent"],
+    [
+      <Clock key="old" className="size-3 text-warning" aria-hidden />,
+      "over 6 months before the latest document",
+    ],
+    [<TriangleAlert key="contra" className="size-3 text-warning" aria-hidden />, "contradicted"],
+    [
+      <UserRound key="after" className="size-3 text-accent-text" aria-hidden />,
+      "recorded after the documents",
+    ],
+  ];
   return (
-    <p className="flex flex-wrap items-center gap-x-3 gap-y-1">
-      {mark(<CircleDashed className="size-3" aria-hidden />, "n.d.: in none of the documents")}
-      {mark(<CircleSlash className="size-3" aria-hidden />, "documented as absent")}
-      {mark(
-        <Clock className="size-3 text-warning" aria-hidden />,
-        "over 6 months before the latest document",
-      )}
-      {mark(<TriangleAlert className="size-3 text-warning" aria-hidden />, "contradicted")}
-      {mark(
-        <UserRound className="size-3 text-accent-text" aria-hidden />,
-        "recorded after the documents",
-      )}
-    </p>
+    <span className="group relative inline-flex">
+      <button
+        type="button"
+        aria-label="What the marks mean"
+        aria-describedby="screen-legend"
+        className="grid size-5 cursor-help place-items-center rounded-full hover:bg-hover hover:text-foreground"
+      >
+        <Info className="size-3.5" aria-hidden />
+      </button>
+      <span
+        id="screen-legend"
+        role="tooltip"
+        className="invisible absolute bottom-full left-0 z-30 mb-1.5 grid w-max max-w-[calc(100vw-2rem)] grid-cols-[auto_1fr] items-center gap-x-2 gap-y-1 rounded-lg bg-surface px-2.5 py-2 opacity-0 shadow-[0_12px_32px_rgb(0_0_0/0.08)] ring-1 ring-border transition-opacity duration-150 group-focus-within:visible group-focus-within:opacity-100 group-hover:visible group-hover:opacity-100"
+      >
+        {marks.map(([icon, text]) => (
+          <Fragment key={text}>
+            {icon}
+            <span>{text}</span>
+          </Fragment>
+        ))}
+      </span>
+    </span>
   );
 }
 
@@ -1200,6 +1235,7 @@ export function ScreenView({
   result,
   layout,
   notes,
+  letterOpen,
   onOpenLetter,
   onCompare,
   onRole,
@@ -1210,6 +1246,8 @@ export function ScreenView({
   layout: Layout;
   /** What clinicians recorded after the documents, for every screen of the patient. */
   notes: Note[];
+  /** Whether a document is open beside the screen. */
+  letterOpen: boolean;
   onOpenLetter: (target: DocumentTarget) => void;
   onCompare: (c: Contradiction) => void;
   onRole: (role: string) => void;
@@ -1296,7 +1334,8 @@ export function ScreenView({
     <div
       ref={grid}
       style={{ "--detail-width": `${detailWidth}px` } as CSSProperties}
-      className="flex flex-col @4xl:min-h-0 @4xl:flex-1 @4xl:flex-row"
+      data-letter={letterOpen || undefined}
+      className="group/screen flex flex-col @4xl:min-h-0 @4xl:flex-1 @4xl:flex-row"
     >
       <div className="min-w-0 flex-1 px-4 py-8 sm:px-10 lg:px-14 @4xl:overflow-y-auto @4xl:[scrollbar-gutter:stable]">
         <div className="mx-auto max-w-[880px]">
@@ -1396,7 +1435,7 @@ export function ScreenView({
                 />
               ))}
             </div>
-            <div className="mt-8 flex flex-col gap-1.5 px-2.5 text-xs text-muted-foreground">
+            <div className="mt-8 flex flex-wrap items-center gap-x-3 gap-y-1.5 px-2.5 text-xs text-muted-foreground">
               {layout.leftOut.length > 0 && (
                 <p className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
                   <EyeOff className="size-3.5" aria-hidden />
