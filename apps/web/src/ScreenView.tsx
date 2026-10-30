@@ -253,19 +253,22 @@ export function layoutScreen(result: ScreenResponse) {
         ]
       : []),
   ];
-  const checked: Section[] = checks.map((check) => ({
-    title: check.title,
-    aside: check.rule,
-    lines: [
-      ...check.items
-        .filter((item) => !item.sources.some((s) => onScreen.has(s.passageId)))
-        .map((item) => ({
-          ...line(check.title, item, item.tag === "Allergy" ? "allergy" : "plain"),
-          label: item.tag,
-        })),
-      ...check.gaps.map((g) => gap(check.title, g.title, g.note, g.action)),
-    ],
-  }));
+  // The sick-day rules hold on every task, so they mark drugs with a chip and open no section.
+  const checked: Section[] = checks
+    .filter((check) => check.kind !== "sickDay")
+    .map((check) => ({
+      title: check.title,
+      aside: check.rule,
+      lines: [
+        ...check.items
+          .filter((item) => !item.sources.some((s) => onScreen.has(s.passageId)))
+          .map((item) => ({
+            ...line(check.title, item, item.tag === "Allergy" ? "allergy" : "plain"),
+            label: item.tag,
+          })),
+        ...check.gaps.map((g) => gap(check.title, g.title, g.note, g.action)),
+      ],
+    }));
   const topics = documented.map((need) => ({
     title: need.title,
     lines: need.facts.filter((f) => !used.has(f)).map((f) => line(need.title, f)),
@@ -391,7 +394,17 @@ function monthsOld(line: Line): number | undefined {
   return months ? Number(months) : undefined;
 }
 
-function LineIcon({ line }: { line: Line }) {
+/** The age of a section whose dated lines are all old, said once in its heading rather than on each line. */
+function sectionAge(lines: Line[]): string | undefined {
+  const dated = lines.filter((line) => line.date);
+  const ages = dated.map(monthsOld).filter((months) => months !== undefined);
+  if (dated.length < 2 || ages.length < dated.length) return undefined;
+  const [low, high] = [Math.min(...ages), Math.max(...ages)];
+  return low === high ? `${low} mo old` : `${low}–${high} mo old`;
+}
+
+/** The mark beside a line; a list row leaves an old value's age to its date column instead. */
+function LineIcon({ line, dated = false }: { line: Line; dated?: boolean }) {
   if (line.tone === "allergy")
     return <ShieldAlert className="size-3.5 text-destructive" aria-label="Allergy" />;
   if (line.tone === "gap")
@@ -404,7 +417,7 @@ function LineIcon({ line }: { line: Line }) {
     );
   if (line.conflict)
     return <TriangleAlert className="size-3.5 text-warning" aria-label="In a contradiction" />;
-  if (monthsOld(line) !== undefined)
+  if (!dated && monthsOld(line) !== undefined)
     return <Clock className="size-3.5 text-warning" aria-label="Older than six months" />;
   if (line.tone === "absent")
     return (
@@ -419,6 +432,11 @@ const CHIPS: Record<CheckKind, { text: string; title: string }> = {
     title: "On the fixed list of drugs to reduce or pause before surgery",
   },
   contrast: { text: "contrast", title: "On the fixed checklist before contrast imaging" },
+  sickDay: {
+    text: "sick day",
+    title:
+      "NHS sick-day rules: stop while dehydrated or not eating and drinking; restart after 24 to 48 hours of eating and drinking normally.",
+  },
 };
 
 function Chips({ kinds, advice }: { kinds: CheckKind[]; advice?: string | undefined }) {
@@ -438,10 +456,13 @@ function LineRow({
   line,
   selected,
   onSelect,
+  aged = false,
 }: {
   line: Line;
   selected: boolean;
   onSelect: (key: string) => void;
+  /** Its section's heading already says the lines are old, so the date stays quiet. */
+  aged?: boolean;
 }) {
   const months = monthsOld(line);
   const gap = line.tone === "gap";
@@ -460,7 +481,7 @@ function LineRow({
       )}
     >
       <span className="translate-y-0.5 self-start">
-        <LineIcon line={line} />
+        <LineIcon line={line} dated />
       </span>
       <span className="col-start-2 text-muted-foreground @xl/list:col-start-auto">
         {line.label}
@@ -515,13 +536,14 @@ function LineRow({
         )}
       </span>
       <span
+        title={months === undefined ? undefined : `${months} months before the latest document`}
         className={cx(
           "col-start-2 text-xs tabular-nums @xl/list:col-start-auto @xl/list:text-right",
-          months === undefined ? "text-muted-foreground" : "text-warning",
+          months === undefined || aged ? "text-muted-foreground" : "text-warning",
         )}
       >
         {line.date ? monthYear(line.date) : ""}
-        {months !== undefined && ` · ${months} mo`}
+        {months !== undefined && <span className="sr-only">, {months} months old</span>}
       </span>
     </button>
   );
@@ -531,10 +553,13 @@ function LineRow({
 function Margin({
   title,
   aside,
+  age,
   children,
 }: {
   title: string;
   aside?: string;
+  /** How old every line in it is, such as "9–10 mo old". */
+  age?: string | undefined;
   children: ReactNode;
 }) {
   return (
@@ -544,6 +569,12 @@ function Margin({
         title={aside ? `${title} · ${aside}` : title}
       >
         {title}
+        {age && (
+          <span className="ml-2 inline-flex items-center gap-1 align-[-1px] font-normal text-warning">
+            <Clock className="size-3" aria-hidden />
+            {age}
+          </span>
+        )}
       </h2>
       <div className="min-w-0 @xl/list:col-span-5 @xl/list:grid @xl/list:grid-cols-subgrid @xl/list:content-start">
         {children}
@@ -561,10 +592,17 @@ function SectionView({
   selected?: string;
   onSelect: (key: string) => void;
 }) {
+  const age = sectionAge(section.lines);
   return (
-    <Margin title={section.title} aside={section.aside}>
+    <Margin title={section.title} aside={section.aside} age={age}>
       {section.lines.map((line) => (
-        <LineRow key={line.key} line={line} selected={line.key === selected} onSelect={onSelect} />
+        <LineRow
+          key={line.key}
+          line={line}
+          selected={line.key === selected}
+          onSelect={onSelect}
+          aged={age !== undefined}
+        />
       ))}
     </Margin>
   );
@@ -1225,7 +1263,7 @@ function Legend() {
     [<CircleSlash key="absent" className="size-3" aria-hidden />, "documented as absent"],
     [
       <Clock key="old" className="size-3 text-warning" aria-hidden />,
-      "over 6 months before the latest document",
+      "over 6 months before the latest document, as is an amber date",
     ],
     [<TriangleAlert key="contra" className="size-3 text-warning" aria-hidden />, "contradicted"],
     [

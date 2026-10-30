@@ -24,7 +24,7 @@ import type {
   ScreenResponse,
   Source,
 } from "@track1/shared";
-import { ANSWER_RULES, AnswerDoc, answerExtension } from "./answers.js";
+import { ANSWER_RULES, AnswerDoc, answerExtension, unreadable } from "./answers.js";
 import { assess } from "./assess.js";
 import { basics } from "./basics.js";
 import { clarifications } from "./clarify.js";
@@ -48,6 +48,7 @@ import {
   indexExtension,
   REVIEW_RULES,
   reviewExtension,
+  withCategories,
 } from "./factIndex.js";
 import {
   bloodPressures,
@@ -355,7 +356,7 @@ export class ClinicalRuntime {
       relevant: c.passages.some((p) => cited.has(p.passageId)),
     }));
     const needs = assess(
-      structuredClone(result.needs) as Need[],
+      withCategories(structuredClone(result.needs) as Need[], index),
       contradictions,
       this.record.summary.asOf,
     );
@@ -418,6 +419,9 @@ export class ClinicalRuntime {
   ask(situation: string, question: string): Promise<Answer> {
     const text = question.trim();
     if (text.length < 3) throw new HttpError(400, "Ask a question about the patient's documents.");
+    // Keyboard mash gets no model run: the model would otherwise make an answer out of it.
+    if (unreadable(text))
+      throw new HttpError(400, "That does not read as a question. Ask about the documents.");
     const { model, thinking } = this.options;
     const key = keyOf(
       ANSWER_RULES,

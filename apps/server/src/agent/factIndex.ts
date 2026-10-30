@@ -24,6 +24,25 @@ const CATEGORIES = [
 
 export type IndexedFact = Fact & { id: string; category: string; date: string };
 
+/**
+ * The facts a screen picked from the index, each with its category there. A picked fact keeps the
+ * indexed label and sources, which find it; screens cached before facts carried one get it too.
+ */
+export function withCategories<T extends { facts: Fact[] }>(
+  needs: T[],
+  index: readonly IndexedFact[],
+): T[] {
+  const key = (f: Fact) => `${f.label}\n${f.sources.map((s) => s.passageId).join(",")}`;
+  const categories = new Map(index.map((f) => [key(f), f.category]));
+  return needs.map((need) => ({
+    ...need,
+    facts: need.facts.map((fact) => {
+      const category = fact.category ?? categories.get(key(fact));
+      return category ? { ...fact, category } : fact;
+    }),
+  }));
+}
+
 /** A drug line cut into its parts, as the medication table shows it. */
 export const DrugParts = Type.Object({
   name: Type.String({ description: "Generic name in English, such as 'Aspirin'." }),

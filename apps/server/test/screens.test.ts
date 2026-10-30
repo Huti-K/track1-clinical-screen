@@ -421,7 +421,7 @@ describe("POST /api/patients/:patientId/screens", () => {
     ]);
   });
 
-  it("lists the drugs to review before an operation, and none for a diabetes review", async () => {
+  it("lists the drugs to review before an operation, and only the sick-day drugs for a diabetes review", async () => {
     const preop = await start(new MemoryStorage(), () =>
       screenArgs("Thrombo ASS 100mg oral 1 0 0 0"),
     );
@@ -430,7 +430,7 @@ describe("POST /api/patients/:patientId/screens", () => {
 
     // Candesartan is a sartan, not an ACE inhibitor; the pre-op leaflet lists aspirin as an
     // antiplatelet and says to stop a sartan on the morning of surgery under general anaesthesia.
-    expect(checks.map((c) => c.kind)).toEqual(["surgery"]);
+    expect(checks.map((c) => c.kind)).toEqual(["surgery", "sickDay"]);
     expect(checks[0]?.items.map((i) => [i.tag, i.value, i.sources[0]?.passageId])).toEqual([
       ["Antiplatelet", "Thrombo ASS (aspirin) 100 mg oral 1-0-0", "D1-9"],
       ["Sartan", "Blopress (candesartan) 8 mg oral 1-0-½", "D1-10"],
@@ -446,7 +446,13 @@ describe("POST /api/patients/:patientId/screens", () => {
       task: "Diabetes review",
     }));
     const later = await postScreen(review, "General practitioner, diabetes review in spring 2020");
-    expect(later.checks).toEqual([]);
+    // The NHS sick-day leaflet names sartans and metformin, not aspirin, and holds on every task.
+    expect(later.checks.map((c) => c.kind)).toEqual(["sickDay"]);
+    expect(later.checks[0]?.items.map((i) => [i.tag, i.sources[0]?.passageId])).toEqual([
+      ["Sartan", "D1-10"],
+      ["Metformin", "D1-11"],
+    ]);
+    expect(later.checks[0]?.items[0]?.detail).toMatch(/stop while dehydrated/);
   });
 
   it("before a CT lists the contrast allergy and metformin and asks for kidney function, though the screen left the allergy out", async () => {
@@ -471,7 +477,7 @@ describe("POST /api/patients/:patientId/screens", () => {
     const { checks } = await postScreen(app, "Radiologist, CT angiography of the neck vessels");
 
     // No fact on the screen says the allergy, so the check quotes the letter.
-    expect(checks.map((c) => c.kind)).toEqual(["contrast"]);
+    expect(checks.map((c) => c.kind)).toEqual(["contrast", "sickDay"]);
     expect(checks[0]?.items.map((i) => [i.tag, i.value, i.sources[0]?.passageId])).toEqual([
       ["Allergy", "KM-Allergie (Übelkeit, Erbrechen)", "D1-2"],
       ["Metformin", "Glucophage (metformin) 1000 mg oral 1-1-1", "D1-11"],
@@ -693,6 +699,27 @@ describe("POST /api/patients/:patientId/answers", () => {
     expect(response.statusCode).toBe(200);
     return response.json<Answer>();
   }
+
+  it("turns away keyboard mash instead of answering it", async () => {
+    // The model would answer anything; the mash must not reach it.
+    const app = await start(
+      new MemoryStorage(),
+      () => screenArgs("x"),
+      "context",
+      () => ({ topic: "Nonsense", facts: [], missing: { note: "Nothing in the documents" } }),
+    );
+
+    for (const question of ["asdfasdf", "sdkfjhsdkf jkjkjk"]) {
+      const response = await app.inject({
+        method: "POST",
+        url: `${PATIENT}/answers`,
+        payload: { situation: SITUATION_GP, question },
+      });
+      expect(response.statusCode).toBe(400);
+      expect(response.json<{ error: string }>().error).toMatch(/does not read as a question/);
+    }
+    expect((await ask(app, "Latest HbA1c?")).topic).toBe("Nonsense");
+  });
 
   it("answers a follow-up question from the passage that says it, and again from the store", async () => {
     // The first answer quotes a value the passage does not contain; the tool rejects it.

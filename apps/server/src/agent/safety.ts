@@ -216,6 +216,16 @@ const SURGERY_DRUGS: DrugClass[] = [
   },
 ];
 
+/** The classes the NHS renal leaflet "Medicines Sick Day Rules" names. */
+const SICK_DAY_CLASSES = new Set([
+  "ACE inhibitor",
+  "Sartan",
+  "NSAID",
+  "Diuretic",
+  "Metformin",
+  "SGLT2 inhibitor",
+]);
+
 const ORDER = SURGERY_DRUGS.flatMap((c) => Object.keys(c.drugs));
 
 /** A dose such as `1000mg`, `5 mcg` or `49/51mg`: drug lines carry one, passing remarks rarely do. */
@@ -393,6 +403,19 @@ function surgeryCheck(record: PatientRecord, drugs: readonly Mention[]): Check {
   };
 }
 
+/** The sick-day drugs apply whatever the task: they are what a patient stops when dehydrated. */
+function sickDayCheck(record: PatientRecord, drugs: readonly Mention[]): Check {
+  const listed = drugs.filter((m) => SICK_DAY_CLASSES.has(m.tag));
+  return {
+    kind: "sickDay",
+    title: "Sick-day rules",
+    rule: 'Fixed list after the NHS renal leaflet "Medicines Sick Day Rules" (LN1142, 05/2024): ACE inhibitors, sartans, NSAIDs, diuretics, metformin and SGLT2 inhibitors.',
+    items: newestPerDrug(listed).map((m) => ({ ...drugItem(record, m), detail: SICK })),
+    gaps: [],
+    passages: [...new Set(listed.map((m) => m.passage.id))],
+  };
+}
+
 function contrastCheck(
   record: PatientRecord,
   occasion: string,
@@ -446,7 +469,8 @@ function contrastCheck(
 
 /**
  * The fixed checks this task triggers, read from the situation, role and task: drugs to review
- * before an operation, and what matters before contrast imaging. Every item is a documented fact;
+ * before an operation, and what matters before contrast imaging; the sick-day drugs on every task.
+ * Every item is a documented fact;
  * `known` facts, already checked against their passages, give a topic its English wording.
  */
 export function safetyChecks(
@@ -459,6 +483,7 @@ export function safetyChecks(
   const checks = [
     ...(SURGERY.test(occasion) ? [surgeryCheck(record, drugs)] : []),
     ...(IMAGING.test(occasion) ? [contrastCheck(record, occasion, drugs, known)] : []),
+    sickDayCheck(record, drugs),
   ];
   return checks
     .filter((check) => check.items.length > 0 || check.gaps.length > 0)

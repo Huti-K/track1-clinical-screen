@@ -89,6 +89,8 @@ export type Fact = {
   date?: string;
   /** For a drug of the medication list, its parts. */
   drug?: Drug;
+  /** For a fact taken from the fact index, its category there, such as "diagnosis". */
+  category?: string;
   sources: Source[];
 };
 
@@ -171,8 +173,11 @@ export type AssessedNeed = Omit<Need, "facts"> & {
   reason: string;
 };
 
-/** `surgery`: drugs to review before an operation. `contrast`: what matters before CT or MRI. */
-export type CheckKind = "surgery" | "contrast";
+/**
+ * `surgery`: drugs to review before an operation. `contrast`: what matters before CT or MRI.
+ * `sickDay`: drugs to stop while dehydrated, on every task.
+ */
+export type CheckKind = "surgery" | "contrast" | "sickDay";
 
 /** A documented fact a check lists, with the class or topic that matched, such as "Sartan". */
 export type CheckItem = AssessedFact & { tag: string };

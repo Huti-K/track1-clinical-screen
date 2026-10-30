@@ -191,6 +191,30 @@ describe("layoutScreen", () => {
         ?.lines.map((line) => [line.label, line.detail]),
     ).toEqual([["Anticoagulant", advice.Anticoagulant]]);
   });
+  it("marks the sick-day drugs in the medication table without a section of their own", () => {
+    const metformin = drug("Metformin", "Glucophage", "1000 mg", "1-1-1", "56780018-53");
+    const sitagliptin = drug("Sitagliptin", "Januvia", "100 mg", "1-0-0", "56780018-54");
+    const result = screen([{ title: "Diabetes", facts: [metformin] }], [metformin, sitagliptin]);
+    result.checks = [
+      {
+        kind: "sickDay",
+        title: "Sick-day rules",
+        rule: "Fixed list.",
+        items: [{ ...metformin, tag: "Metformin", detail: "Stop while dehydrated." }],
+        gaps: [],
+        passages: ["56780018-53"],
+      },
+    ];
+
+    const layout = layoutScreen(result);
+
+    expect(layout.drugs.map((line) => [line.drug?.name, line.checks])).toEqual([
+      ["Metformin", ["sickDay"]],
+      ["Sitagliptin", []],
+    ]);
+    expect(layout.before.map((s) => s.title)).not.toContain("Sick-day rules");
+  });
+
   it("charts each measurement over time and rings the point a contradiction cites", () => {
     const point = (value: number, date: string, passageId: string) => ({
       value,

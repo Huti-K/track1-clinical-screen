@@ -40,6 +40,33 @@ export const ANSWER_RULES = `You answer one follow-up question a clinician asks 
 6. Give the answer a topic of at most 4 words, such as "Carotid duplex follow-up".
 7. Call submit_answer once with the complete answer. Do not answer in text.`;
 
+const VOWEL = /[aeiouyäöüàáâèéêìíîòóôùúû]/u;
+/** Four neighbouring keys of a QWERTZ or QWERTY row, either way; no German or English word has them. */
+const KEY_RUN =
+  /qwer|uiop|asdf|sdfg|dfgh|fghj|ghjk|hjkl|yxcv|zxcv|xcvb|cvbn|vbnm|rewq|poiu|fdsa|gfds|hgfd|jhgf|kjhg|lkjh|vcxy|vcxz|bvcx|nbvc|mnbv/;
+
+/**
+ * Whether a token could be a word: German or English, an abbreviation such as CRP or eGFR, or a
+ * term with digits such as HbA1c or T2DM.
+ */
+function wordLike(token: string): boolean {
+  const word = token.toLowerCase();
+  if (!/\p{L}/u.test(word)) return false;
+  if (/(.)\1{3}/u.test(word) || KEY_RUN.test(word)) return false;
+  // A chunk typed over and over, such as "asdasd" or "jkljkl".
+  if (word.length >= 6 && /^(\p{L}{2,3})\1+\p{L}{0,2}$/u.test(word)) return false;
+  if (/\d/.test(word) || word.length <= 4) return true;
+  // Long mash has few vowels; German words with long consonant runs, such as "Angstschweiß",
+  // still have more than one in seven letters.
+  const vowels = [...word].filter((c) => VOWEL.test(c)).length;
+  return word.length < 8 ? vowels > 0 : vowels / word.length >= 0.15;
+}
+
+/** A question no reader could make out, such as "asdf" or "sdkfjhsdkf": none of its words is one. */
+export function unreadable(question: string): boolean {
+  return !(question.match(/[\p{L}\d]+/gu) ?? []).some(wordLike);
+}
+
 const AnswerArgs = Type.Object({
   topic: Type.String({ description: "What the answer is about, at most 4 words." }),
   facts: Type.Array(FactArgs, {

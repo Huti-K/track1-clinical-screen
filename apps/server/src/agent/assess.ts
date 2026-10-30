@@ -49,7 +49,8 @@ export function assess(
           .sort()
           .at(-1) ?? asOf;
       const months = monthsBetween(newest, asOf);
-      if (months > STALE_AFTER_MONTHS)
+      // A diagnosis stays true however long ago a letter last named it; drugs and values go stale.
+      if (months > STALE_AFTER_MONTHS && fact.category !== "diagnosis")
         return {
           ...fact,
           light: "yellow",

@@ -170,6 +170,7 @@ export function basics(
       value,
       ...(detail ? { detail } : {}),
       date,
+      category: "diagnosis",
       sources,
     }));
 
