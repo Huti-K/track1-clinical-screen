@@ -40,7 +40,6 @@ browser (apps/web) ──HTTP──> Fastify API (apps/server) ──> one Clini
 ```
 
 What we built:
-
 - `packages/patient-record`: loads a patient's documents, decodes `<BR>` and HTML entities, splits each document into numbered passages (sentences and table rows) and checks that a quote appears in a passage.
 - `packages/shared`: types shared by server and web.
 - `apps/server`, a Fastify API with one runtime per patient folder in `data/`:
@@ -55,11 +54,11 @@ What we built:
 
 Models and services:
 
-| Job | Model | Reasoning |
-|---|---|---|
-| Screens and follow-up answers | `openai-codex/gpt-6.1-terra` | low |
-| Fact index and its review | `openai-codex/gpt-6.1-terra` | low |
-| Contradiction scan | `openai-codex/gpt-6.1-terra` | high |
+| Job                           | Model                        | Reasoning |
+| ----------------------------- | ---------------------------- | --------- |
+| Screens and follow-up answers | `openai-codex/gpt-6.1-terra` | low       |
+| Fact index and its review     | `openai-codex/gpt-6.1-terra` | low       |
+| Contradiction scan            | `openai-codex/gpt-6.1-terra` | high      |
 
 The model is reached through the user's ChatGPT sign-in (OpenAI Responses API) on ChatGPT's fast mode (`service_tier: priority`). Any other pi-ai provider works by setting `MODEL` and its API key in `.env`; see `.env.example` for every setting. No other external service is used. The patient data stays local apart from the model calls.
 
@@ -67,16 +66,15 @@ The model is reached through the user's ChatGPT sign-in (OpenAI Responses API) o
 
 Measured with `pnpm eval --set all` on 30 October 2026, on a fresh store with the default settings above. The eval types each situation's title and description into the app and grades the screen against `cases/expected.json` with regular expressions over the fact text, so a "MISS" can still be a correct answer worded differently.
 
-| Metric | Result | Target |
-|---|---|---|
-| Correct answers (5 situations) | 13 of 15 | 15 of 15 |
-| Traceability | Every fact on screen quotes its linked passage word for word (checked in code; facts that fail are dropped) | 100% |
-| Invented facts | Not counted by hand yet; every fact must quote its passage, and the index review drops values the passage does not support | 0 |
-| Contradictions | 7 real, 0 false alarms | 5 or more |
-| Load time, slowest of the 5 | 4.9 s | under 10 s |
+| Metric                         | Result                                                                                                                     | Target     |
+| ------------------------------ | -------------------------------------------------------------------------------------------------------------------------- | ---------- |
+| Correct answers (5 situations) | 13 of 15                                                                                                                   | 15 of 15   |
+| Traceability                   | Every fact on screen quotes its linked passage word for word (checked in code; facts that fail are dropped)                | 100%       |
+| Invented facts                 | Not counted by hand yet; every fact must quote its passage, and the index review drops values the passage does not support | 0          |
+| Contradictions                 | 7 real, 0 false alarms                                                                                                     | 5 or more  |
+| Load time, slowest of the 5    | 4.9 s                                                                                                                      | under 10 s |
 
 What does not work yet:
-
 - **2.3, the date of the planned operation.** The screen shows "Quadrantectomy and IORT" with its date in the date column, but that column shows month and year only (05/16), not the day, 16 May 2016.
 - **3.3, the weight change.** The screen shows 66 kg and a loss of 12 kg since June 2015, but not the 78 kg and 67 kg it was computed from.
 - **The first screen right after the first start** reads the whole record while the fact index is being built (about 20 s per patient) and takes 9–16 s. Every screen after that takes 4–5 s, and a repeated situation is served from the store.
