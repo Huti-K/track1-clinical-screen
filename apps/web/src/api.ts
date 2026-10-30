@@ -31,21 +31,26 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 const post = <T>(path: string, body: object = {}, signal?: AbortSignal) =>
   request<T>(path, { method: "POST", body: JSON.stringify(body), signal });
 
+/** Every patient route names its patient; the server answers it from that patient's record only. */
+const of = (patientId: string, path = "") =>
+  `/api/patients/${encodeURIComponent(patientId)}${path}`;
+
 export const api = {
   auth: () => request<AuthStatus>("/api/auth"),
   login: (method: "browser" | "device") => post<AuthStatus>("/api/auth/login", { method }),
   loginInput: (value: string) => post<AuthStatus>("/api/auth/login/input", { value }),
   cancelLogin: () => post<AuthStatus>("/api/auth/cancel"),
   logout: () => post<AuthStatus>("/api/auth/logout"),
-  patient: () => request<PatientSummary>("/api/patient"),
-  document: (id: string) => request<PatientDocument>(`/api/documents/${encodeURIComponent(id)}`),
-  screen: (situation: string, signal?: AbortSignal) =>
-    post<ScreenResponse>("/api/screens", { situation }, signal),
-  answer: (situation: string, question: string) =>
-    post<Answer>("/api/answers", { situation, question }),
-  notes: () => request<Note[]>("/api/notes"),
-  addNote: (note: Pick<Note, "topic" | "text" | "source" | "clarifies">) =>
-    post<Note>("/api/notes", note),
-  removeNote: (id: string) =>
-    request<unknown>(`/api/notes/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  patients: () => request<PatientSummary[]>("/api/patients"),
+  document: (patientId: string, id: string) =>
+    request<PatientDocument>(of(patientId, `/documents/${encodeURIComponent(id)}`)),
+  screen: (patientId: string, situation: string, signal?: AbortSignal) =>
+    post<ScreenResponse>(of(patientId, "/screens"), { situation }, signal),
+  answer: (patientId: string, situation: string, question: string) =>
+    post<Answer>(of(patientId, "/answers"), { situation, question }),
+  notes: (patientId: string) => request<Note[]>(of(patientId, "/notes")),
+  addNote: (patientId: string, note: Pick<Note, "topic" | "text" | "source" | "clarifies">) =>
+    post<Note>(of(patientId, "/notes"), note),
+  removeNote: (patientId: string, id: string) =>
+    request<unknown>(of(patientId, `/notes/${encodeURIComponent(id)}`), { method: "DELETE" }),
 };

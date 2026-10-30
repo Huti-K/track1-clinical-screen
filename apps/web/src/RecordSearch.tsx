@@ -3,6 +3,7 @@ import { Search } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Button, formatDate } from "./components/ui";
 import { type DocumentTarget, highlight } from "./DocumentPanel";
+import { usePatientId } from "./patient";
 import { loadDocument } from "./SourcePopover";
 
 /**
@@ -21,11 +22,12 @@ export function RecordSearch({
   const [open, setOpen] = useState(false);
   const [loaded, setLoaded] = useState<PatientDocument[]>([]);
   const input = useRef<HTMLInputElement>(null);
+  const patientId = usePatientId();
 
   useEffect(() => {
-    if (!focused || loaded.length > 0) return;
-    Promise.all(documents.map((d) => loadDocument(d.id))).then(setLoaded, () => {});
-  }, [focused, loaded.length, documents]);
+    if (!focused || loaded.length > 0 || !patientId) return;
+    Promise.all(documents.map((d) => loadDocument(patientId, d.id))).then(setLoaded, () => {});
+  }, [focused, loaded.length, documents, patientId]);
 
   useEffect(() => {
     const slash = (e: KeyboardEvent) => {
@@ -88,7 +90,7 @@ export function RecordSearch({
             if (query) setQuery("");
             else input.current?.blur();
           }}
-          placeholder={`Search her ${documents.length} documents`}
+          placeholder={`Search the ${documents.length} documents`}
           aria-label="Search all documents"
           className="min-w-0 flex-1 bg-transparent outline-none placeholder:text-muted-foreground focus-visible:shadow-none"
         />

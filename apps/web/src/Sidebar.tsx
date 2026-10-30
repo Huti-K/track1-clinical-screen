@@ -15,6 +15,9 @@ export type SidebarProps = {
   /** `rail` is the folded desktop column; `drawer` the mobile overlay, closed with its X. */
   mode: "full" | "rail" | "drawer";
   patient?: PatientSummary;
+  /** Every patient, for the switcher. */
+  patients: PatientSummary[];
+  onPatient: (patient: PatientSummary) => void;
   auth: AuthStatus;
   screens: ScreenEntry[];
   currentScreenId?: string;
@@ -208,10 +211,10 @@ export function Sidebar(props: SidebarProps) {
       </div>
 
       <PatientSwitcher
-        patients={patient ? [patient] : []}
+        patients={props.patients}
         current={patient}
         below={mode === "drawer"}
-        onPick={onHome}
+        onPick={props.onPatient}
       />
 
       <div className="-mx-3 min-h-0 flex-1 overflow-y-auto px-3">

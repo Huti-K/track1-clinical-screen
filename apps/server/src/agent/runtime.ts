@@ -88,6 +88,15 @@ const NotesDoc = defineDoc<{ notes: Note[] }>({
   checkpointWhen: () => true,
 });
 
+/** The patient a store belongs to: one store holds one patient's screens, fact index and notes. */
+const PatientDoc = defineDoc<{ id: string }>({
+  kind: "track1.patient",
+  version: 1,
+  scope: "session",
+  initial: () => ({ id: "" }),
+  checkpointWhen: () => true,
+});
+
 const ScanDoc = defineDoc<{ conversationId: number; request: string }>({
   kind: "track1.scan",
   version: 1,
@@ -198,6 +207,15 @@ export class ClinicalRuntime {
       },
       context,
     );
+    const owner = await harness.commit(async (tx) => {
+      const doc = await tx.doc(PatientDoc);
+      doc.id ||= record.summary.id;
+      return doc.id;
+    }, context);
+    if (owner !== record.summary.id) {
+      await harness.close(context);
+      throw new Error(`The store belongs to patient ${owner}, not to ${record.summary.id}.`);
+    }
     // Picks up screens and scans a previous process left running.
     harness.resume();
     return new ClinicalRuntime(harness, options.record, options, extensions);
@@ -356,7 +374,8 @@ export class ClinicalRuntime {
     const summary = { green: 0, yellow: 0, red: 0 };
     for (const need of needs) summary[need.light]++;
     return {
-      id: key,
+      // The key is per store, so the same situation would give two patients the same key.
+      id: keyOf(this.record.summary.id, key),
       patient: this.record.summary,
       summary,
       screen: {
@@ -393,7 +412,7 @@ export class ClinicalRuntime {
   /** Answers a follow-up question in the situation of a screen, from the documents only. */
   ask(situation: string, question: string): Promise<Answer> {
     const text = question.trim();
-    if (text.length < 3) throw new HttpError(400, "Ask a question about her documents.");
+    if (text.length < 3) throw new HttpError(400, "Ask a question about the patient's documents.");
     const { model, thinking } = this.options;
     const key = keyOf(
       ANSWER_RULES,

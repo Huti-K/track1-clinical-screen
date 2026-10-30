@@ -34,10 +34,10 @@ it("keeps patient data behind the ChatGPT sign-in and closes it again on sign-ou
     model,
     deviceIdPath: join(directory, "device-id"),
   });
-  const app = await buildApp(runtime, { login });
+  const app = await buildApp([runtime], { login });
   try {
-    expect((await app.inject("/api/patient")).statusCode).toBe(401);
-    expect((await app.inject("/api/documents/D1")).statusCode).toBe(401);
+    expect((await app.inject("/api/patients")).statusCode).toBe(401);
+    expect((await app.inject("/api/patients/9999-0001/documents/D1")).statusCode).toBe(401);
     expect((await app.inject("/api/auth")).json<AuthStatus>()).toMatchObject({
       signedIn: false,
       subscription: true,
@@ -51,10 +51,10 @@ it("keeps patient data behind the ChatGPT sign-in and closes it again on sign-ou
       refresh: "refresh-token",
       expires: Date.now() + 3_600_000,
     }));
-    expect((await app.inject("/api/patient")).statusCode).toBe(200);
+    expect((await app.inject("/api/patients")).statusCode).toBe(200);
 
     expect((await app.inject({ method: "POST", url: "/api/auth/logout" })).statusCode).toBe(200);
-    expect((await app.inject("/api/patient")).statusCode).toBe(401);
+    expect((await app.inject("/api/patients")).statusCode).toBe(401);
   } finally {
     await app.close();
     await runtime.close();

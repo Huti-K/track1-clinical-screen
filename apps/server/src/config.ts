@@ -1,10 +1,11 @@
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 import {
   MODEL_THINKING_LEVELS as THINKING_LEVELS,
   type ModelThinkingLevel as ThinkingLevel,
 } from "@earendil-works/pi-ai/providers/model-schema";
 import type { ModelRef } from "@earendil-works/pi-durable";
 import type { Retrieval } from "./agent/clinical.js";
+import type { ServiceTier } from "./service-tier.js";
 
 const root = resolve(import.meta.dirname, "../../..");
 
@@ -19,9 +20,10 @@ export function parseModel(value: string): ModelRef {
 export const config = {
   port: Number(process.env.PORT ?? 3001),
   host: process.env.HOST ?? "127.0.0.1",
-  patientDir: resolve(root, process.env.PATIENT_DIR ?? "data/patient-0000-0001"),
-  /** The Pi Durable store: screens, contradictions and every model turn survive a restart. */
-  storePath: resolve(root, process.env.STORE_PATH ?? ".data/agent.sqlite"),
+  /** Every folder in it with a `patient.json` is one patient, such as `data/patient-0000-0001`. */
+  patientsDir: resolve(root, process.env.PATIENTS_DIR ?? "data"),
+  /** The Pi Durable stores, one per patient: screens, contradictions and every model turn survive a restart. */
+  storeDir: resolve(root, process.env.STORE_DIR ?? ".data"),
   /** Subscription tokens from the sign-in, readable by the owner only. */
   credentialsPath: resolve(root, process.env.CREDENTIALS_PATH ?? ".data/credentials.json"),
   deviceIdPath: resolve(root, ".data/device-id"),
@@ -35,12 +37,25 @@ export const config = {
   /** Reasoning effort per job: screens must be fast, the one-off contradiction scan thorough. */
   screenThinking: thinking(process.env.SCREEN_THINKING, "low"),
   scanThinking: thinking(process.env.SCAN_THINKING, "high"),
+  /** ChatGPT's fast mode for every OpenAI request: quicker, but it uses the plan's limits about twice as fast. */
+  serviceTier: serviceTier(process.env.SERVICE_TIER),
   retrieval: retrieval(process.env.RETRIEVAL),
 };
+
+/** A patient's own store: no screen, fact index or note of one patient is kept with another's. */
+export function storePathFor(patientId: string): string {
+  return join(config.storeDir, `agent-${patientId.replace(/[^\w.-]/g, "_")}.sqlite`);
+}
 
 function retrieval(value = "index"): Retrieval {
   if (value !== "context" && value !== "tools" && value !== "hybrid" && value !== "index")
     throw new Error(`RETRIEVAL must be context, tools, hybrid or index, got "${value}".`);
+  return value;
+}
+
+function serviceTier(value = "priority"): ServiceTier {
+  if (value !== "priority" && value !== "default")
+    throw new Error(`SERVICE_TIER must be priority or default, got "${value}".`);
   return value;
 }
 

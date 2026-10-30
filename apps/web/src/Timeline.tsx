@@ -88,13 +88,16 @@ function savedWhen(iso: string): string {
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 const TONES = {
-  plain: "bg-surface-2 text-muted-foreground",
+  plain: "bg-surface text-muted-foreground ring-1 ring-border",
   cited: "bg-[color-mix(in_oklch,var(--accent)_14%,var(--chrome))] text-accent-text",
   current: "bg-accent text-accent-foreground",
   stay: "bg-chrome text-muted-foreground",
 } as const;
 
-/** A dot on the line: the icon says what it is, the fill whether the screen cites it. */
+/**
+ * A dot on the line for something that opens: the icon says what it is, the fill whether the screen
+ * cites it. Stays only label their documents and carry a bare icon instead.
+ */
 function Node({
   icon: Icon,
   tone,
@@ -431,16 +434,20 @@ export function Timeline({
         />
         <div
           title={kind}
-          className="relative grid h-8 grid-cols-[22px_minmax(0,1fr)_auto] items-center gap-x-2.5 pr-2 pl-[9px] text-xs text-muted-foreground"
+          className="relative grid h-8 grid-cols-[22px_minmax(0,1fr)_auto] items-center gap-x-2.5 pr-2 pl-[9px] text-2xs text-muted-foreground"
         >
           <Node
             icon={stay.type === "outpatient" ? Building2 : stay.type ? Bed : CalendarDays}
             tone="stay"
           />
           <span className="truncate">
-            <span className="sr-only">{kind}, </span>
-            <b className="mr-1.5 font-semibold text-foreground tabular-nums">{stay.months}</b>
-            {stay.department}
+            {stay.type && (
+              <span className="font-medium">
+                {stay.type === "outpatient" ? "Outpatient" : "Inpatient"} ·{" "}
+              </span>
+            )}
+            <span className="font-medium">{stay.department}</span>
+            <span className="tabular-nums"> · {stay.months}</span>
           </span>
           {inStay.size > 0 && (
             <span

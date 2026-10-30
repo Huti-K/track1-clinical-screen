@@ -6,7 +6,7 @@ import { keysOf, SHORTCUTS } from "./hotkeys";
 /** Every key the app answers to, for this dialog and the Keyboard settings. */
 export const SHORTCUT_ROWS = [
   ...Object.values(SHORTCUTS).map((s) => ({ keys: keysOf(s), description: s.description })),
-  { keys: ["/"], description: "Search her documents" },
+  { keys: ["/"], description: "Search the patient's documents" },
   { keys: ["Esc"], description: "Close the open document or menu" },
 ];
 

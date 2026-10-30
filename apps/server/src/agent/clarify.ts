@@ -20,7 +20,7 @@ const REMEASURE: Partial<Record<Kind, string>> = {
 /** A step another clinician, department or document closes, such as the GP's report. */
 const RECORDS =
   /\b(GP|general practitioner|family doctor|hospital|clinic|department|surgeon|cardiolog\w*|radiolog\w*|neurolog\w*|ophthalmolog\w*|oncolog\w*|patholog\w*|vascular|colleague|referr\w*|request|obtain|retrieve|locate|reports?|letters?|records?)\b/i;
-const PATIENT = /\b(ask|patient|her|she)\b/i;
+const PATIENT = /\b(ask|patient|her|she|him|he|his)\b/i;
 const TEST =
   /\b(order|measure|check|test|repeat|draw|perform|labs?|bloods?|ECG|EKG|echo\w*|TTE|x-?ray|CT|MRI|ultrasound|duplex|sonograph\w*|creatinine|eGFR|CBC|coagulation|INR|HbA1c|potassium|electrolytes)\b/i;
 

@@ -6,8 +6,14 @@ import Fastify, { type FastifyInstance, type FastifyServerOptions } from "fastif
 import { type ClinicalRuntime, HttpError } from "./agent/runtime.js";
 import type { SubscriptionLogin } from "./auth/login.js";
 
+type PatientParams = { patientId: string };
+
+/**
+ * The API over one runtime per patient. Every patient route names its patient, and only that
+ * patient's runtime answers it, from that patient's documents, model conversations and store.
+ */
 export async function buildApp(
-  runtime: ClinicalRuntime,
+  runtimes: readonly ClinicalRuntime[],
   options: {
     /** Without it every route is open, as in tests whose model needs no sign-in. */
     login?: SubscriptionLogin;
@@ -17,6 +23,12 @@ export async function buildApp(
 ): Promise<FastifyInstance> {
   const app = Fastify({ logger: options.logger ?? false });
   const { login } = options;
+  const byId = new Map(runtimes.map((runtime) => [runtime.record.summary.id, runtime]));
+  const runtimeOf = ({ patientId }: PatientParams) => {
+    const runtime = byId.get(patientId);
+    if (!runtime) throw new HttpError(404, `No patient ${patientId}.`);
+    return runtime;
+  };
 
   app.setErrorHandler((error: Error & { statusCode?: number }, request, reply) => {
     const status = error instanceof HttpError ? error.statusCode : (error.statusCode ?? 500);
@@ -61,24 +73,32 @@ export async function buildApp(
     });
   }
 
-  app.get("/api/patient", async () => runtime.record.summary);
+  app.get("/api/patients", async () => runtimes.map((runtime) => runtime.record.summary));
 
-  app.get<{ Params: { id: string } }>("/api/documents/:id", async (request) => {
-    const document = runtime.record.document(request.params.id);
-    if (!document) throw new HttpError(404, `No document ${request.params.id}.`);
-    return document;
-  });
+  app.get<{ Params: PatientParams }>(
+    "/api/patients/:patientId",
+    async (request) => runtimeOf(request.params).record.summary,
+  );
 
-  app.post<{ Body: { situation: string } }>(
-    "/api/screens",
+  app.get<{ Params: PatientParams & { id: string } }>(
+    "/api/patients/:patientId/documents/:id",
+    async (request) => {
+      const document = runtimeOf(request.params).record.document(request.params.id);
+      if (!document) throw new HttpError(404, `No document ${request.params.id}.`);
+      return document;
+    },
+  );
+
+  app.post<{ Params: PatientParams; Body: { situation: string } }>(
+    "/api/patients/:patientId/screens",
     {
       schema: { body: Type.Object({ situation: Type.String({ minLength: 3, maxLength: 4000 }) }) },
     },
-    async (request) => runtime.screen(request.body.situation),
+    async (request) => runtimeOf(request.params).screen(request.body.situation),
   );
 
-  app.post<{ Body: { situation: string; question: string } }>(
-    "/api/answers",
+  app.post<{ Params: PatientParams; Body: { situation: string; question: string } }>(
+    "/api/patients/:patientId/answers",
     {
       schema: {
         body: Type.Object({
@@ -87,17 +107,22 @@ export async function buildApp(
         }),
       },
     },
-    async (request) => runtime.ask(request.body.situation, request.body.question),
+    async (request) => runtimeOf(request.params).ask(request.body.situation, request.body.question),
   );
 
-  app.get("/api/contradictions", async () => runtime.contradictions());
+  app.get<{ Params: PatientParams }>("/api/patients/:patientId/contradictions", async (request) =>
+    runtimeOf(request.params).contradictions(),
+  );
 
-  app.get("/api/notes", async () => runtime.notes());
+  app.get<{ Params: PatientParams }>("/api/patients/:patientId/notes", async (request) =>
+    runtimeOf(request.params).notes(),
+  );
 
   app.post<{
+    Params: PatientParams;
     Body: { topic: string; text: string; source: "patient" | "clinician"; clarifies?: string };
   }>(
-    "/api/notes",
+    "/api/patients/:patientId/notes",
     {
       schema: {
         body: Type.Object({
@@ -109,16 +134,20 @@ export async function buildApp(
       },
     },
     async (request, reply) => {
+      const runtime = runtimeOf(request.params);
       const author = login ? (await login.status()).account : undefined;
       const note = await runtime.addNote({ ...request.body, ...(author ? { author } : {}) });
       return reply.status(201).send(note);
     },
   );
 
-  app.delete<{ Params: { id: string } }>("/api/notes/:id", async (request, reply) => {
-    await runtime.removeNote(request.params.id);
-    return reply.status(204).send();
-  });
+  app.delete<{ Params: PatientParams & { id: string } }>(
+    "/api/patients/:patientId/notes/:id",
+    async (request, reply) => {
+      await runtimeOf(request.params).removeNote(request.params.id);
+      return reply.status(204).send();
+    },
+  );
 
   if (options.webDist && existsSync(options.webDist)) {
     await app.register(fastifyStatic, { root: options.webDist });

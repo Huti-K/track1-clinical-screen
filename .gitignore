@@ -8,3 +8,4 @@ output/
 # IBM's patient data and the hackathon cases stay out of this repository (hackathon rule)
 data/
 cases/
+.playwright-cli/

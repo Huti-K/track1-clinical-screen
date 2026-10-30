@@ -1,5 +1,5 @@
 import type { PatientRecord } from "@track1/patient-record";
-import type { AssessedFact, Basics, Contradiction, Fact } from "@track1/shared";
+import type { AssessedFact, Basics, Contradiction, Drug, Fact, Passage } from "@track1/shared";
 import { assess } from "./assess.js";
 import type { IndexedFact } from "./factIndex.js";
 import { type Kind, type Measurement, sourceOf } from "./measurements.js";
@@ -19,6 +19,65 @@ const ALLERGY_WORDS = /\b(allerg\w*|media|medium|agents?|reactions?|intoleran\w*
 /** A diagnosis the documents rule out or only suspect is no problem the patient has. */
 const NOT_A_PROBLEM = /ruled out|excluded|suspected|unlikely|ausgeschlossen|verdacht|\bV\.\s?a\./i;
 const MAX_PROBLEMS = 12;
+const MEDICATION = /medikation/i;
+const CELL_DOSE =
+  /(\d+(?:[.,]\d+)?(?:\/\d+(?:[.,]\d+)?)?)\s?(mg|mcg|µg|ug|g|ml|IE|I\.E\.)(?![a-zäöü])/i;
+const SLOT = /^(?:\d+|½|¼|1\/2|1\/4)$/;
+
+function medicationRow(
+  record: PatientRecord,
+  passage: Passage,
+  cells: string[],
+  date: string,
+): Fact {
+  const [written = "", route = "", ...rest] = cells;
+  const dose = CELL_DOSE.exec(written);
+  const name = (dose ? written.slice(0, dose.index) : written).trim();
+  const slots = rest.slice(0, 4).map((slot) => slot.replace("1/2", "½").replace("1/4", "¼"));
+  const timed = slots.length === 4 && slots.every((slot) => SLOT.test(slot));
+  const schedule = timed
+    ? (slots[3] === "0" ? slots.slice(0, 3) : slots).join("-")
+    : rest.join(" ").trim();
+  const drug: Drug = {
+    name,
+    ...(dose ? { dose: `${dose[1]?.replace(",", ".")} ${dose[2]}` } : {}),
+    ...(schedule ? { schedule } : {}),
+    ...(route ? { route } : {}),
+  };
+  return {
+    label: name,
+    value: [name, drug.dose].filter(Boolean).join(" "),
+    date,
+    drug,
+    sources: [sourceOf(record, passage, passage.text)],
+  };
+}
+
+function medication(record: PatientRecord, index: readonly IndexedFact[]): Fact[] {
+  const latest = record.documents
+    .flatMap((doc) =>
+      (doc.layout ?? []).flatMap((block) =>
+        block.kind === "table" &&
+        block.rows.some((row) => MEDICATION.test(record.passage(row.passageId)?.section ?? ""))
+          ? [{ date: doc.date, rows: block.rows }]
+          : [],
+      ),
+    )
+    .at(-1);
+  if (!latest) return [];
+  return latest.rows.flatMap((row) => {
+    const passage = record.passage(row.passageId);
+    if (!passage) return [];
+    const indexed = index.find(
+      (f) => f.category === "medication" && f.sources.some((s) => s.passageId === passage.id),
+    );
+    if (!indexed) return [medicationRow(record, passage, row.cells, latest.date)];
+    const { label, value, detail, date, drug, sources } = indexed;
+    return [
+      { label, value, ...(detail ? { detail } : {}), date, ...(drug ? { drug } : {}), sources },
+    ];
+  });
+}
 
 const newestFirst = (a: { date?: string }, b: { date?: string }) =>
   (b.date ?? "").localeCompare(a.date ?? "");
@@ -124,5 +183,6 @@ export function basics(
     measures: assessed(measures),
     allergies: assessed(allergies),
     problems: assessed(problems),
+    medication: assessed(medication(record, index)),
   };
 }

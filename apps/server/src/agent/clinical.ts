@@ -51,11 +51,22 @@ export const ContradictionsDoc = defineDoc<{
 /** How the model reaches the documents: all in its context, through search tools, or both. */
 export type Retrieval = "context" | "tools" | "hybrid" | "index";
 
+/** How the letters name the patient, and the pronouns the prompt uses for them. */
+const NAMING: Record<string, { alias: string; object: string; subject: string }> = {
+  female: { alias: "Beispielpatientin", object: "her", subject: "she" },
+  male: { alias: "Beispielpatient", object: "him", subject: "he" },
+};
+
 function recordHeader(record: PatientRecord): string[] {
   const { summary } = record;
+  const { alias, object, subject } = NAMING[summary.sex] ?? {
+    alias: "Beispielpatient",
+    object: "the patient",
+    subject: "the patient",
+  };
   return [
     `Patient: ${summary.name}, ${summary.sex}, born ${summary.dateOfBirth}.`,
-    `The documents are German clinical letters that call her "Beispielpatientin" or "NN_${summary.id}". The latest document is from ${summary.asOf}; she was ${summary.ageAsOf} then. Present tense means as of that date.`,
+    `The documents are German clinical letters that call ${object} "${alias}" or "NN_${summary.id}". The latest document is from ${summary.asOf}; ${subject} was ${summary.ageAsOf} then. Present tense means as of that date.`,
   ];
 }
 

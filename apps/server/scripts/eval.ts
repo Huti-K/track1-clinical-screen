@@ -25,6 +25,8 @@ import { HELDOUT, HELDOUT_ANSWERS, HELDOUT_EXPECTED } from "./heldout.js";
 import { gradeAnswer, gradeContradictions, screenText } from "./rubric.js";
 
 const root = resolve(import.meta.dirname, "../../..");
+/** The patient whose situations and expected answers are in cases/. */
+const PATIENT = "0000-0001";
 type Expected = { id: string; question: string; answer: string; sources: string[] };
 
 type RunSpec = {
@@ -168,11 +170,11 @@ async function run(
     ...HELDOUT_EXPECTED.map((e) => ({ ...e, sources: [] })),
   ];
   const chosen = [...(set === "heldout" ? [] : situations()), ...(set === "known" ? [] : HELDOUT)];
-  const { runtime, login } = await openConfigured(
+  const { runtimes, login } = await openConfigured(
     (message, error) => console.warn(`[${spec.label}] ${message}`, error ?? ""),
     {
       // A fresh store per run, so every screen is generated and timed.
-      storage: new MemoryStorage(),
+      storage: () => new MemoryStorage(),
       timeoutMs: 300_000,
       ...(spec.model ? { model: parseModel(spec.model) } : {}),
       ...(spec.screen || spec.scan
@@ -183,6 +185,8 @@ async function run(
     },
   );
   try {
+    const runtime = runtimes.find((r) => r.record.summary.id === PATIENT);
+    if (!runtime) throw new Error(`Patient ${PATIENT}, whose situations these are, is missing.`);
     if (!(await login.signedIn()))
       throw new Error(`Not signed in to ${runtime.modelName}. Sign in in the app or set a key.`);
     mkdirSync(outDir, { recursive: true });
@@ -248,7 +252,7 @@ async function run(
     );
     return summary;
   } finally {
-    await runtime.close();
+    await Promise.all(runtimes.map((r) => r.close()));
   }
 }
 

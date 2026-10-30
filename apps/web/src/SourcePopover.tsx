@@ -4,16 +4,18 @@ import { useEffect, useState } from "react";
 import { api } from "./api";
 import { formatDate } from "./components/ui";
 import { highlight } from "./DocumentPanel";
+import { usePatientId } from "./patient";
 
 const documents = new Map<string, Promise<PatientDocument>>();
 
 /** Each document is fetched once per page load; the popover asks for it to show a quote's neighbours. */
-export function loadDocument(id: string): Promise<PatientDocument> {
-  let pending = documents.get(id);
+export function loadDocument(patientId: string, id: string): Promise<PatientDocument> {
+  const key = `${patientId}/${id}`;
+  let pending = documents.get(key);
   if (!pending) {
-    pending = api.document(id);
-    pending.catch(() => documents.delete(id));
-    documents.set(id, pending);
+    pending = api.document(patientId, id);
+    pending.catch(() => documents.delete(key));
+    documents.set(key, pending);
   }
   return pending;
 }
@@ -28,10 +30,11 @@ export function SourcePopover({
   passages: ScreenResponse["passages"];
   onOpenLetter: (source: Source) => void;
 }) {
+  const patientId = usePatientId();
   const [document, setDocument] = useState<PatientDocument>();
   useEffect(() => {
-    loadDocument(source.documentId).then(setDocument, () => {});
-  }, [source.documentId]);
+    if (patientId) loadDocument(patientId, source.documentId).then(setDocument, () => {});
+  }, [patientId, source.documentId]);
   const passage = passages[source.passageId];
   const index = document?.passages.findIndex((p) => p.id === source.passageId) ?? -1;
   const before = index > 0 ? document?.passages[index - 1] : undefined;

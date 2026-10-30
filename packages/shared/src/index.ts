@@ -52,6 +52,8 @@ export type PatientSummary = {
   asOf: string;
   ageAsOf: number;
   documents: DocumentInfo[];
+  /** Situations the start page offers as examples for this patient, from `situations.json`. */
+  situations?: string[];
 };
 
 /** A fact's link to the exact words it rests on. */
@@ -206,9 +208,11 @@ export type Basics = {
   allergies: AssessedFact[];
   /** Diagnoses the documents name, the most often named first. */
   problems: AssessedFact[];
+  medication: AssessedFact[];
 };
 
 export type ScreenResponse = {
+  /** The same situation for the same patient has the same ID; two patients never share one. */
   id: string;
   patient: PatientSummary;
   screen: Omit<Screen, "needs"> & { needs: AssessedNeed[] };

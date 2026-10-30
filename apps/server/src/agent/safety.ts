@@ -26,40 +26,61 @@ const RENAL =
 
 type DrugClass = {
   tag: string;
+  /** What to do before the operation, in the words of the leaflet the class comes from. */
+  advice: string;
   /** English generic name, and how German-language letters write it: generic or brand. */
   drugs: Record<string, RegExp>;
+  /** Text after the name that takes the drug off the list, such as a patch for oral-only HRT. */
+  except?: RegExp;
 };
 
+const PRE_OP = "Royal Berkshire pre-op leaflet";
+const SICK_DAY = "NHS sick-day rules";
+const ACE_SARTAN = `${PRE_OP}: under general anaesthesia stop on the morning of surgery; under local anaesthesia continue.`;
+const DIABETES = `${PRE_OP}: may need reducing or pausing before surgery; needs a plan from pre-op assessment.`;
+const NSAID = `${PRE_OP}: before spinal surgery stop 3 days before.`;
+const SICK = `${SICK_DAY}: stop while dehydrated or not eating and drinking; restart after 24 to 48 hours of eating and drinking normally.`;
+
 /**
- * Classes commonly paused or adjusted before an operation: the sick-day drugs, which risk lactic
- * acidosis, ketoacidosis, hypoglycaemia, kidney injury or hypotension in a fasting patient, and
- * GLP-1 agonists, which slow gastric emptying.
+ * The drugs to reduce or pause before an operation. Every drug the Royal Berkshire NHS leaflet
+ * "Reducing / pausing medication immediately before surgery" (RBFT Pre-Op Assessment, Nov 2025,
+ * `references/reducing_pausing-medication-immediately-before-surgery_nov25.pdf`) names is listed,
+ * with its advice; its progesterone-only pill continues as normal and is left out. Austrian generics
+ * and brands of the same classes are added, such as phenprocoumon as the vitamin K antagonist
+ * letters here use. The sick-day drugs the leaflet does not name, SGLT2 inhibitors and diuretics,
+ * stay on the list after the NHS renal leaflet "Medicines Sick Day Rules" (LN1142, revised 05/2024,
+ * `references/medicines-sick-day-rules.pdf`).
  */
 const SURGERY_DRUGS: DrugClass[] = [
   {
-    tag: "Metformin",
-    drugs: { metformin: /\b(metformin|glucophage|siofor|diabesin|mescorit|juformin)\b/i },
-  },
-  {
-    tag: "SGLT2 inhibitor",
+    tag: "Anticoagulant",
+    advice: `${PRE_OP}: needs a dose plan from 5 days before to 3 days after the operation.`,
     drugs: {
-      dapagliflozin: /\b(dapagliflozin|forxiga)\b/i,
-      empagliflozin: /\b(empagliflozin|jardiance)\b/i,
-      canagliflozin: /\b(canagliflozin|invokana)\b/i,
-      ertugliflozin: /\b(ertugliflozin|steglatro)\b/i,
+      warfarin: /\b(warfarin|coumadin|lawarin)\b/i,
+      phenprocoumon: /\b(phenprocoumon|marcoumar|marcumar)\b/i,
+      apixaban: /\b(apixaban|eliquis)\b/i,
+      rivaroxaban: /\b(rivaroxaban|xarelto)\b/i,
+      edoxaban: /\b(edoxaban|lixiana)\b/i,
+      dabigatran: /\b(dabigatran|pradaxa)\b/i,
+      tinzaparin: /\b(tinzaparin|innohep)\b/i,
+      enoxaparin: /\b(enoxaparin|lovenox|clexane)\b/i,
+      dalteparin: /\b(dalteparin|fragmin)\b/i,
     },
   },
   {
-    tag: "Sulfonylurea",
+    tag: "Antiplatelet",
+    advice: `${PRE_OP}: needs a dose plan from 7 days before to 3 days after the operation.`,
     drugs: {
-      glimepiride: /\b(glimepiride?|amaryl)\b/i,
-      gliclazide: /\b(gliclazide?|diamicron)\b/i,
-      glibenclamide: /\b(glibenclamide?|euglucon|daonil)\b/i,
-      gliquidone: /\b(gliquidone?|glurenorm)\b/i,
+      aspirin: /\b(thrombo ?ass|aspirin|acetylsalicylsäure|ass)\b/i,
+      dipyridamole: /\b(dipyridamole?|persantin|aggrenox)\b/i,
+      clopidogrel: /\b(clopidogrel|plavix)\b/i,
+      ticagrelor: /\b(ticagrelor|brilique)\b/i,
+      prasugrel: /\b(prasugrel|efient)\b/i,
     },
   },
   {
     tag: "ACE inhibitor",
+    advice: ACE_SARTAN,
     drugs: {
       ramipril: /\b(ramipril|delix|tritace|hypren)\b/i,
       enalapril: /\b(enalapril|xanef|renitec)\b/i,
@@ -74,6 +95,7 @@ const SURGERY_DRUGS: DrugClass[] = [
   },
   {
     tag: "Sartan",
+    advice: ACE_SARTAN,
     drugs: {
       candesartan: /\b(candesartan|blopress|atacand)\b/i,
       losartan: /\b(losartan|cozaar|lorzaar)\b/i,
@@ -85,21 +107,88 @@ const SURGERY_DRUGS: DrugClass[] = [
     },
   },
   {
+    tag: "Insulin",
+    advice: DIABETES,
+    drugs: {
+      insulin:
+        /\b(insulin|lantus|levemir|tresiba|toujeo|abasaglar|semglee|novorapid|fiasp|humalog|lyumjev|apidra|actrapid|insulatard|mixtard|huminsulin|insuman)\b/i,
+    },
+  },
+  {
+    tag: "Metformin",
+    advice: DIABETES,
+    drugs: { metformin: /\b(metformin|glucophage|siofor|diabesin|mescorit|juformin)\b/i },
+  },
+  {
+    tag: "Sulfonylurea",
+    advice: DIABETES,
+    drugs: {
+      gliclazide: /\b(gliclazide?|diamicron)\b/i,
+      glipizide: /\b(glipizide?|minidiab)\b/i,
+      glimepiride: /\b(glimepiride?|amaryl)\b/i,
+      glibenclamide: /\b(glibenclamide?|euglucon|daonil)\b/i,
+      gliquidone: /\b(gliquidone?|glurenorm)\b/i,
+    },
+  },
+  {
+    tag: "Glitazone",
+    advice: DIABETES,
+    drugs: { pioglitazone: /\b(pioglitazone?|actos)\b/i },
+  },
+  {
+    tag: "GLP-1 agonist",
+    advice: DIABETES,
+    drugs: {
+      exenatide: /\b(exenatide?|byetta|bydureon)\b/i,
+      liraglutide: /\b(liraglutide?|victoza|saxenda)\b/i,
+      lixisenatide: /\b(lixisenatide?|lyxumia)\b/i,
+      dulaglutide: /\b(dulaglutide?|trulicity)\b/i,
+      semaglutide: /\b(semaglutide?|ozempic|rybelsus|wegovy)\b/i,
+      tirzepatide: /\b(tirzepatide?|mounjaro)\b/i,
+    },
+  },
+  {
+    tag: "SGLT2 inhibitor",
+    advice: SICK,
+    drugs: {
+      dapagliflozin: /\b(dapagliflozin|forxiga)\b/i,
+      empagliflozin: /\b(empagliflozin|jardiance)\b/i,
+      canagliflozin: /\b(canagliflozin|invokana)\b/i,
+      ertugliflozin: /\b(ertugliflozin|steglatro)\b/i,
+    },
+  },
+  {
     tag: "Diuretic",
+    advice: SICK,
     drugs: {
       furosemide: /\b(furosemide?|lasix)\b/i,
       torasemide: /\b(torasemide?|torem|unat)\b/i,
+      bumetanide: /\b(bumetanide?|burinex)\b/i,
       hydrochlorothiazide: /\b(hydrochlorothiazide?|esidrix)\b/i,
+      bendroflumethiazide: /\b(bendroflumethiazide?|aprinox|neo-naclex)\b/i,
       chlortalidone: /\b(chlortalidone?|hygroton)\b/i,
       indapamide: /\b(indapamide?|natrilix)\b/i,
+      metolazone: /\b(metolazone?|zaroxolyn|metenix)\b/i,
       xipamide: /\bxipamide?\b/i,
       spironolactone: /\b(spironolactone?|aldactone)\b/i,
       eplerenone: /\b(eplerenone?|inspra)\b/i,
     },
   },
   {
-    tag: "NSAID",
+    tag: "Oestrogen",
+    advice: `${PRE_OP}: before major or leg surgery, or when she will not walk afterwards, stop 4 weeks before; restart once walking.`,
     drugs: {
+      "combined pill": /\b(ethinylestradiol|microgynon|marvelon|yasmin)\b/i,
+      "oral HRT": /\b(estradiol|östradiol|oestradiol|estrofem|progynova|premarin)\b/i,
+    },
+    // The leaflet stops oral HRT only.
+    except: /transdermal|pflaster|patch|\bgel\b|vaginal|spray/i,
+  },
+  {
+    tag: "NSAID",
+    advice: NSAID,
+    drugs: {
+      ketorolac: /\b(ketorolac|toradol)\b/i,
       ibuprofen: /\b(ibuprofen|nurofen|brufen)\b/i,
       diclofenac: /\b(diclofenac|voltaren)\b/i,
       naproxen: /\b(naproxen|aleve)\b/i,
@@ -110,22 +199,40 @@ const SURGERY_DRUGS: DrugClass[] = [
     },
   },
   {
-    tag: "GLP-1 agonist",
+    tag: "Herbal or vitamin E",
+    advice: `${PRE_OP}: stop 2 weeks before surgery.`,
     drugs: {
-      exenatide: /\b(exenatide?|byetta|bydureon)\b/i,
-      liraglutide: /\b(liraglutide?|victoza|saxenda)\b/i,
-      dulaglutide: /\b(dulaglutide?|trulicity)\b/i,
-      semaglutide: /\b(semaglutide?|ozempic|rybelsus|wegovy)\b/i,
-      lixisenatide: /\b(lixisenatide?|lyxumia)\b/i,
-      tirzepatide: /\b(tirzepatide?|mounjaro)\b/i,
+      "CBD oil": /\b(CBD|cannabidiol)\b/i,
+      echinacea: /\b(echinacea|echinacin)\b/i,
+      ephedra: /\bephedra\b/i,
+      garlic: /\b(garlic|knoblauch)\b/i,
+      ginkgo: /\b(ginkgo|tebonin|cerebokan)\b/i,
+      ginseng: /\bginseng\b/i,
+      kava: /\bkava\b/i,
+      "St John's wort": /\b(johanniskraut|hypericum|jarsin|st\.? john'?s wort)\b/i,
+      valerian: /\b(valerian|baldrian)\b/i,
+      "vitamin E": /\b(vitamin E|tocopherol)\b/i,
     },
   },
 ];
 
 const ORDER = SURGERY_DRUGS.flatMap((c) => Object.keys(c.drugs));
 
-/** A dose such as `1000mg` or `5 mcg`: drug lines carry one, passing remarks rarely do. */
-const DOSE = /(\d+(?:[.,]\d+)?)\s?(mg|mcg|µg|ug|g|ml|IE|I\.E\.)(?![a-zäöü])/i;
+/** A dose such as `1000mg`, `5 mcg` or `49/51mg`: drug lines carry one, passing remarks rarely do. */
+const DOSE = /(\d+(?:[.,]\d+)?(?:\/\d+(?:[.,]\d+)?)?)\s?(mg|mcg|µg|ug|g|ml|IE|I\.E\.)(?![a-zäöü])/i;
+/** How far after the drug's name its dose may start, as in `Clexane Injektionslösung 40mg`. */
+const DOSE_WITHIN = 24;
+
+/**
+ * The dose right after a drug's name, in the text that follows it. A dose further on, or after a
+ * comma or a sentence end, belongs to something else, as in `Furosemid … 7 kg. Die … auf 5 mg`.
+ */
+function doseAfter(rest: string): RegExpExecArray | null {
+  const dose = DOSE.exec(rest);
+  if (!dose || dose.index > DOSE_WITHIN) return null;
+  return /[,;]|\.\s+[A-ZÄÖÜ]/.test(rest.slice(0, dose.index)) ? null : dose;
+}
+
 /** A line that ends a drug rather than giving it. */
 const STOPPED = /abgesetzt|pausiert|gestoppt|beendet|abgebrochen|nicht mehr/i;
 /** The table's columns morning, midday, evening and night, such as `1 0 1/2 0`. */
@@ -140,6 +247,7 @@ const ROUTES: [RegExp, string][] = [
 /** One drug of the fixed classes named with a dose in one passage. */
 type Mention = {
   tag: string;
+  advice: string;
   generic: string;
   /** The name as the passage writes it, such as `Blopress`, and where. */
   written: string;
@@ -148,15 +256,48 @@ type Mention = {
   date: string;
 };
 
+/** A heading over the drugs a patient takes, such as `Entlassungsmedikation` or `Dauermedikation`. */
+const MEDICATION = /medikation/i;
+
+/** Rows of a medication table: each gives a drug, with or without a dose, as an insulin pump. */
+function medicationRows(record: PatientRecord): Set<string> {
+  return new Set(
+    record.documents.flatMap((doc) =>
+      (doc.layout ?? []).flatMap((block) =>
+        block.kind === "table"
+          ? block.rows
+              .map((row) => row.passageId)
+              .filter((id) => MEDICATION.test(record.passage(id)?.section ?? ""))
+          : [],
+      ),
+    ),
+  );
+}
+
 function mentions(record: PatientRecord): Mention[] {
+  const rows = medicationRows(record);
   return record.documents.flatMap((doc) =>
     doc.passages.flatMap((passage) => {
-      if (!DOSE.test(passage.text) || STOPPED.test(passage.text)) return [];
-      return SURGERY_DRUGS.flatMap(({ tag, drugs }) =>
+      if (STOPPED.test(passage.text)) return [];
+      return SURGERY_DRUGS.flatMap(({ tag, advice, drugs, except }) =>
         Object.entries(drugs).flatMap(([generic, pattern]) => {
           const match = pattern.exec(passage.text);
-          return match
-            ? [{ tag, generic, written: match[0], at: match.index, passage, date: doc.date }]
+          const rest = match && passage.text.slice(match.index + match[0].length);
+          return match &&
+            rest !== null &&
+            (rows.has(passage.id) || doseAfter(rest)) &&
+            !except?.test(rest)
+            ? [
+                {
+                  tag,
+                  advice,
+                  generic,
+                  written: match[0],
+                  at: match.index,
+                  passage,
+                  date: doc.date,
+                },
+              ]
             : [];
         }),
       );
@@ -180,7 +321,7 @@ const capitalized = (text: string) => text.charAt(0).toUpperCase() + text.slice(
 /** "Blopress 8mg oral 1 0 1/2 0 ST" reads "Blopress (candesartan) 8 mg oral 1-0-½". */
 function drugValue({ generic, written, at, passage }: Mention): string {
   const rest = passage.text.slice(at + written.length);
-  const dose = DOSE.exec(rest);
+  const dose = doseAfter(rest);
   const slots = SLOTS.exec(rest)
     ?.slice(1)
     .map((slot) => slot.replace("1/2", "½").replace("1/4", "¼"));
@@ -244,8 +385,9 @@ function surgeryCheck(record: PatientRecord, drugs: readonly Mention[]): Check {
   return {
     kind: "surgery",
     title: "Review before surgery",
-    rule: "Fixed list: sick-day drugs (metformin, SGLT2 inhibitors, sulfonylureas, ACE inhibitors, sartans, diuretics, NSAIDs) and GLP-1 agonists.",
-    items: newestPerDrug(drugs).map((m) => drugItem(record, m)),
+    rule: 'Fixed list after the Royal Berkshire pre-op leaflet "Reducing / pausing medication immediately before surgery" (Nov 2025): blood thinners, ACE inhibitors, sartans, diabetes drugs, oral oestrogens, NSAIDs, herbal medicines and vitamin E, plus SGLT2 inhibitors and diuretics after the NHS sick-day rules.',
+    // Each drug says what its leaflet advises before the operation.
+    items: newestPerDrug(drugs).map((m) => ({ ...drugItem(record, m), detail: m.advice })),
     gaps: [],
     passages: [...new Set(drugs.map((m) => m.passage.id))],
   };

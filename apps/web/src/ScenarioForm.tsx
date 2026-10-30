@@ -6,14 +6,6 @@ import { highlight } from "./DocumentPanel";
 import { PatientHeader, ROLES } from "./ScreenView";
 import { roleIcon } from "./Timeline";
 
-const EXAMPLES = [
-  "Pre-operative anaesthesia check. You are the anaesthetist. She is scheduled for a hip replacement next week.",
-  "Surgery planning after the case conference. You are the surgeon planning her operation.",
-  "Diabetes review at the GP. You are her general practitioner (GP), reviewing her diabetes.",
-  "Emergency department at night. You are the emergency physician on night duty. She arrives with shortness of breath.",
-  "Open follow-ups from the last hospital stay. You are her GP. You check which follow-ups from her last hospital stay are still open.",
-];
-
 const TASKS: Record<string, string[]> = {
   Anaesthetist: ["Pre-op check", "Medication before surgery", "Post-op pain plan"],
   Surgeon: ["Pre-op planning", "Post-op review"],
@@ -84,6 +76,7 @@ export function ScenarioForm({
   const { role, text } = parse(situation);
   const suggestions = open && !busy && (role || text.trim()) ? suggest(text, role) : [];
   const RoleIcon = role ? roleIcon(role) : UserRound;
+  const examples = patient?.situations ?? [];
 
   useEffect(() => {
     // A phone keyboard would cover the page, so only a pointer device gets the cursor right away.
@@ -258,11 +251,11 @@ export function ScenarioForm({
           </div>
         )}
       </form>
-      {!role && !text.trim() && (
+      {!role && !text.trim() && examples.length > 0 && (
         <>
           <p className="mt-6 mb-2 text-center text-xs text-muted-foreground">Examples</p>
           <div className="flex flex-wrap justify-center gap-1.5">
-            {EXAMPLES.map((example) => (
+            {examples.map((example) => (
               <button
                 key={example}
                 type="button"

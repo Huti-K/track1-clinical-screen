@@ -1,0 +1,18 @@
+{
+  "documents": [
+    {
+      "id": "M1",
+      "title": "Anästhesiologische Voruntersuchung",
+      "date": "2019-03-04",
+      "type": "Anästhesiebefund",
+      "department": "Anästhesie"
+    },
+    {
+      "id": "M2",
+      "title": "Stat. Patientenbrief",
+      "date": "2018-11-14",
+      "type": "Arztbrief",
+      "department": "Kardiologie"
+    }
+  ]
+}

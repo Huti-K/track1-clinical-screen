@@ -9,24 +9,28 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/*
+ * Status colours follow the Okabe–Ito palette so they stay apart with red-green colour blindness:
+ * danger is reddish purple, caution orange, success blue. Never red against green.
+ */
 :root {
   color-scheme: light;
-  --chrome: oklch(0.978 0 0);
-  --recessed: oklch(0.965 0 0);
-  --surface: oklch(1 0 0);
-  --surface-2: oklch(0.955 0 0);
-  --hover: oklch(0.925 0 0);
-  --foreground: oklch(0.2923 0.01 270);
-  --muted-foreground: oklch(0.5 0.015 268);
-  --accent: oklch(0.535 0.19 255);
-  --accent-foreground: oklch(0.9905 0.0025 265);
-  --accent-text: oklch(0.535 0.19 255);
+  --chrome: oklch(0.975 0.004 250);
+  --recessed: oklch(0.962 0.004 250);
+  --surface: oklch(1 0.002 250);
+  --surface-2: oklch(0.952 0.004 250);
+  --hover: oklch(0.922 0.004 250);
+  --foreground: oklch(0.29 0.016 250);
+  --muted-foreground: oklch(0.5 0.018 250);
+  --accent: oklch(0.52 0.13 245);
+  --accent-foreground: oklch(0.99 0.003 245);
+  --accent-text: oklch(0.52 0.13 245);
   --accent-wash: color-mix(in oklch, var(--accent) 12%, transparent);
-  --success: oklch(0.48 0.11 165);
-  --warning: oklch(0.5 0.12 60);
-  --warning-wash: oklch(0.96 0.045 85);
-  --destructive: oklch(0.52 0.2 37);
-  --destructive-wash: oklch(0.96 0.03 37);
+  --success: oklch(0.5 0.12 240);
+  --warning: oklch(0.56 0.13 70);
+  --warning-wash: oklch(0.96 0.04 70);
+  --destructive: oklch(0.5 0.15 350);
+  --destructive-wash: oklch(0.96 0.03 350);
   --border: color-mix(in oklch, var(--foreground) 12%, transparent);
   --selection: color-mix(in oklch, var(--accent) 22%, transparent);
   --radius: 0.7rem;
@@ -35,21 +39,21 @@
 
 .dark {
   color-scheme: dark;
-  --chrome: oklch(0.17 0 0);
-  --recessed: oklch(0.2 0 0);
-  --surface: oklch(0.23 0 0);
-  --surface-2: oklch(0.28 0 0);
-  --hover: oklch(0.32 0 0);
-  --foreground: oklch(0.875 0.004 255);
-  --muted-foreground: oklch(0.71 0.012 258);
-  --accent: oklch(0.6987 0.15 255);
-  --accent-foreground: oklch(0.24 0.01 260);
-  --accent-text: oklch(0.6987 0.15 255);
-  --success: oklch(0.76 0.13 168);
-  --warning: oklch(0.8 0.12 68);
-  --warning-wash: oklch(0.3 0.05 70);
-  --destructive: oklch(0.73 0.17 37);
-  --destructive-wash: oklch(0.3 0.05 37);
+  --chrome: oklch(0.17 0.006 250);
+  --recessed: oklch(0.2 0.006 250);
+  --surface: oklch(0.23 0.003 250);
+  --surface-2: oklch(0.28 0.006 250);
+  --hover: oklch(0.32 0.006 250);
+  --foreground: oklch(0.875 0.02 250);
+  --muted-foreground: oklch(0.71 0.022 250);
+  --accent: oklch(0.72 0.12 240);
+  --accent-foreground: oklch(0.24 0.01 245);
+  --accent-text: oklch(0.72 0.12 240);
+  --success: oklch(0.76 0.11 235);
+  --warning: oklch(0.78 0.15 75);
+  --warning-wash: oklch(0.3 0.05 75);
+  --destructive: oklch(0.72 0.13 350);
+  --destructive-wash: oklch(0.3 0.04 350);
 }
 
 @theme inline {

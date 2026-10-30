@@ -3,6 +3,7 @@ import { FileText } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { formatDate } from "./components/ui";
 import { type DocumentTarget, highlight } from "./DocumentPanel";
+import { usePatientId } from "./patient";
 import { loadDocument } from "./SourcePopover";
 
 /**
@@ -35,10 +36,11 @@ export function SourceQuote({
   passages: ScreenResponse["passages"];
   onOpenLetter: (target: DocumentTarget) => void;
 }) {
+  const patientId = usePatientId();
   const [document, setDocument] = useState<PatientDocument>();
   useEffect(() => {
-    loadDocument(source.documentId).then(setDocument, () => {});
-  }, [source.documentId]);
+    if (patientId) loadDocument(patientId, source.documentId).then(setDocument, () => {});
+  }, [patientId, source.documentId]);
   const index = document?.passages.findIndex((p) => p.id === source.passageId) ?? -1;
   const passage = passages[source.passageId] ?? document?.passages[index];
   const before = index > 0 ? document?.passages[index - 1] : undefined;

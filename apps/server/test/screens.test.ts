@@ -20,6 +20,8 @@ import { ClinicalRuntime } from "../src/agent/runtime.js";
 import { buildApp } from "../src/app.js";
 
 const FIXTURE = join(import.meta.dirname, "fixtures/patient");
+/** The fixture patient's routes. */
+const PATIENT = "/api/patients/9999-0001";
 const SITUATION = "Anaesthetist, pre-operative check before hip surgery";
 
 const BMI_CONTRADICTION = {
@@ -188,7 +190,7 @@ async function start(
     record: await loadPatientRecord(FIXTURE),
     retrieval,
   });
-  const app = await buildApp(runtime);
+  const app = await buildApp([runtime]);
   open.push({ app, runtime });
   return app;
 }
@@ -196,7 +198,7 @@ async function start(
 async function postScreen(app: FastifyInstance, situation = SITUATION): Promise<ScreenResponse> {
   const response = await app.inject({
     method: "POST",
-    url: "/api/screens",
+    url: `${PATIENT}/screens`,
     payload: { situation },
   });
   expect(response.statusCode).toBe(200);
@@ -210,7 +212,7 @@ afterEach(async () => {
   }
 });
 
-describe("POST /api/screens", () => {
+describe("POST /api/patients/:patientId/screens", () => {
   it("links every fact to the passage that says it, after the model fixes a misquote", async () => {
     // The first submission quotes a dose the row does not contain; the tool rejects it.
     const app = await start(new MemoryStorage(), (attempt) =>
@@ -245,7 +247,7 @@ describe("POST /api/screens", () => {
       "D1-6",
     ]);
 
-    const document = await app.inject({ method: "GET", url: "/api/documents/D1" });
+    const document = await app.inject({ method: "GET", url: `${PATIENT}/documents/D1` });
     const cited = document.json<{ passages: { id: string; text: string }[] }>().passages;
     expect(cited.find((p) => p.id === "D1-9")?.text).toBe("Thrombo ASS 100mg oral 1 0 0 0 ST");
   });
@@ -426,12 +428,17 @@ describe("POST /api/screens", () => {
 
     const { checks } = await postScreen(preop);
 
-    // Candesartan is a sartan, not an ACE inhibitor; low-dose aspirin is on no sick-day list.
+    // Candesartan is a sartan, not an ACE inhibitor; the pre-op leaflet lists aspirin as an
+    // antiplatelet and says to stop a sartan on the morning of surgery under general anaesthesia.
     expect(checks.map((c) => c.kind)).toEqual(["surgery"]);
     expect(checks[0]?.items.map((i) => [i.tag, i.value, i.sources[0]?.passageId])).toEqual([
-      ["Metformin", "Glucophage (metformin) 1000 mg oral 1-1-1", "D1-11"],
+      ["Antiplatelet", "Thrombo ASS (aspirin) 100 mg oral 1-0-0", "D1-9"],
       ["Sartan", "Blopress (candesartan) 8 mg oral 1-0-½", "D1-10"],
+      ["Metformin", "Glucophage (metformin) 1000 mg oral 1-1-1", "D1-11"],
     ]);
+    expect(checks[0]?.items[1]?.detail).toMatch(
+      /general anaesthesia stop on the morning of surgery/,
+    );
 
     const review = await start(new MemoryStorage(), () => ({
       ...screenArgs("Thrombo ASS 100mg oral 1 0 0 0"),
@@ -496,7 +503,7 @@ describe("POST /api/screens", () => {
     const app = await start(new MemoryStorage(), () => screenArgs("Thrombo ASS 100mg"));
     const response = await app.inject({
       method: "POST",
-      url: "/api/screens",
+      url: `${PATIENT}/screens`,
       payload: { situation: "" },
     });
     expect(response.statusCode).toBe(400);
@@ -601,15 +608,57 @@ describe("POST /api/screens", () => {
       ["HTN", "D1-16"],
     ]);
   });
+
+  it("lists every drug of the latest medication table, whatever the screen picked", async () => {
+    const app = await start(
+      new MemoryStorage(),
+      () => screenArgs("Thrombo ASS 100mg oral 1 0 0 0"),
+      "index",
+    );
+
+    const { basics } = await postScreen(app);
+
+    expect(
+      basics.medication.map((f) => [
+        f.drug?.name,
+        f.drug?.dose,
+        f.drug?.schedule,
+        f.sources[0]?.passageId,
+      ]),
+    ).toEqual([
+      ["Aspirin", "100 mg", "1-0-0", "D1-9"],
+      ["Blopress", "8 mg", "1-0-½", "D1-10"],
+      ["Glucophage", "1000 mg", "1-1-1", "D1-11"],
+    ]);
+  });
+
+  it("flags a drug from nine months before the latest letter as old, but not a diagnosis", async () => {
+    const app = await start(
+      new MemoryStorage(),
+      () => ({
+        role: "General practitioner",
+        task: "Diabetes review",
+        needs: [{ title: "Diabetes", status: "documented", factIds: ["f4", "f2"], facts: [] }],
+      }),
+      "index",
+    );
+
+    const { screen } = await postScreen(app);
+
+    const [diagnosis, drug] = screen.needs[0]?.facts ?? [];
+    expect([diagnosis?.label, diagnosis?.light]).toEqual(["T2DM", "green"]);
+    expect([drug?.label, drug?.light]).toEqual(["Aspirin (Thrombo ASS)", "yellow"]);
+    expect(drug?.reason).toMatch(/9 months before/);
+  });
 });
 
-describe("POST /api/answers", () => {
+describe("POST /api/patients/:patientId/answers", () => {
   const SITUATION_GP = "General practitioner, diabetes review in spring 2020";
 
   async function ask(app: FastifyInstance, question: string) {
     const response = await app.inject({
       method: "POST",
-      url: "/api/answers",
+      url: `${PATIENT}/answers`,
       payload: { situation: SITUATION_GP, question },
     });
     expect(response.statusCode).toBe(200);
@@ -692,7 +741,7 @@ describe("POST /api/answers", () => {
   });
 });
 
-describe("/api/notes", () => {
+describe("/api/patients/:patientId/notes", () => {
   it("keeps what a clinician recorded across a restart until it is removed", async () => {
     const directory = mkdtempSync(join(tmpdir(), "track1-notes-"));
     try {
@@ -700,7 +749,7 @@ describe("/api/notes", () => {
       const first = await start(await openNodeSqliteStorage(path), () => screenArgs("x"));
       const created = await first.inject({
         method: "POST",
-        url: "/api/notes",
+        url: `${PATIENT}/notes`,
         payload: {
           topic: "Prior imaging",
           text: "CT with contrast in 2014, nausea afterwards",
@@ -719,7 +768,7 @@ describe("/api/notes", () => {
       expect(Date.parse(note.recordedAt)).not.toBeNaN();
       const empty = await first.inject({
         method: "POST",
-        url: "/api/notes",
+        url: `${PATIENT}/notes`,
         payload: { topic: "Prior imaging", text: "   ", source: "patient" },
       });
       expect(empty.statusCode).toBe(400);
@@ -728,11 +777,11 @@ describe("/api/notes", () => {
       await runtime.close();
 
       const second = await start(await openNodeSqliteStorage(path), () => screenArgs("x"));
-      expect((await second.inject("/api/notes")).json<Note[]>()).toEqual([note]);
+      expect((await second.inject(`${PATIENT}/notes`)).json<Note[]>()).toEqual([note]);
 
-      const url = `/api/notes/${note.id}`;
+      const url = `${PATIENT}/notes/${note.id}`;
       expect((await second.inject({ method: "DELETE", url })).statusCode).toBe(204);
-      expect((await second.inject("/api/notes")).json<Note[]>()).toEqual([]);
+      expect((await second.inject(`${PATIENT}/notes`)).json<Note[]>()).toEqual([]);
       expect((await second.inject({ method: "DELETE", url })).statusCode).toBe(404);
     } finally {
       rmSync(directory, { recursive: true, force: true });

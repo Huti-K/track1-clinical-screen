@@ -12,6 +12,7 @@ import {
 } from "react";
 import { api } from "./api";
 import { Button, cx, ErrorText, formatDate } from "./components/ui";
+import { usePatientId } from "./patient";
 import { DOCUMENT_PANE_KEY } from "./prefs";
 import { SidePane } from "./resize";
 
@@ -504,14 +505,16 @@ export function DocumentPanel({
   const viewport = useRef<HTMLDivElement>(null);
   /** The middle of the view as a share of the pages' width and height. */
   const center = useRef<{ x: number; y: number }>(undefined);
+  const patientId = usePatientId();
 
   useEffect(() => {
     setError(undefined);
     setSheets([]);
     setPage(1);
     center.current = undefined;
-    api.document(target.documentId).then(setDocument, (e: Error) => setError(e.message));
-  }, [target.documentId]);
+    if (!patientId) return;
+    api.document(patientId, target.documentId).then(setDocument, (e: Error) => setError(e.message));
+  }, [patientId, target.documentId]);
 
   useLayoutEffect(() => {
     const element = viewport.current;

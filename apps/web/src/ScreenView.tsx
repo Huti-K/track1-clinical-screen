@@ -10,13 +10,13 @@ import type {
   Source,
 } from "@track1/shared";
 import {
+  ArrowUp,
   Check,
   ChevronDown,
   CircleDashed,
   CircleSlash,
   ClipboardCopy,
   Clock,
-  CornerDownLeft,
   EyeOff,
   MessageCircleQuestionMark,
   NotebookPen,
@@ -28,8 +28,8 @@ import {
 import {
   type CSSProperties,
   type FormEvent,
+  Fragment,
   type ReactNode,
-  type RefObject,
   useEffect,
   useMemo,
   useRef,
@@ -37,7 +37,7 @@ import {
 } from "react";
 import { api } from "./api";
 import { ClarifyList, ClarifyPane, type NoteInput, noteTime } from "./Clarify";
-import { Avatar, Button, cx, formatDate, Sex } from "./components/ui";
+import { Avatar, Button, cx, formatDate, Keys, Sex } from "./components/ui";
 import type { DocumentTarget } from "./DocumentPanel";
 import { screenText } from "./exportText";
 import { Field, PANE, SHEET, SourceQuote } from "./Pane";
@@ -54,7 +54,7 @@ export const ROLES = [
   "Ward nurse",
 ];
 
-const ALLERGY = /allerg|cave|intoleran|unverträglich|reaction/i;
+const ALLERGY = /allerg|intoleran|unverträglich|\bcave\b/i;
 const THINNER =
   /aspirin|\bass\b|clopidogrel|prasugrel|ticagrelor|heparin|enoxaparin|apixaban|rivaroxaban|edoxaban|dabigatran|warfarin|phenprocoumon|marcumar|anticoagul|antiplatelet|blood thinner/i;
 /** A medication schedule as the screen writes it: morning-midday-evening, optionally night. */
@@ -85,6 +85,8 @@ export type Line = {
   conflict?: Contradiction;
   /** The fixed checks that list it, such as the drugs to review before surgery. */
   checks: CheckKind[];
+  /** What the pre-op leaflet advises for a drug the surgery check lists from the same passage. */
+  advice?: string;
   note?: Note;
   /** A topic the screen left out, which the pane offers to ask about. */
   leftOut?: boolean;
@@ -144,6 +146,11 @@ function lineFactory(result: ScreenResponse) {
     );
   const checksOf = (sources: Source[]) =>
     checks.filter((c) => sources.some((s) => c.passages.includes(s.passageId))).map((c) => c.kind);
+  const adviceOf = (sources: Source[]) =>
+    checks
+      .find((c) => c.kind === "surgery")
+      ?.items.find((i) => i.sources.some((s) => sources.some((t) => t.passageId === s.passageId)))
+      ?.detail;
   let count = 0;
   const key = () => `line-${count++}`;
   const line = (
@@ -155,6 +162,7 @@ function lineFactory(result: ScreenResponse) {
     const drug = isDrug(fact) ? drugOf(fact) : undefined;
     const detail =
       fact.detail ?? (drug ? [drug.schedule, drug.route].filter(Boolean).join(", ") : undefined);
+    const advice = adviceOf(fact.sources);
     return {
       key: id,
       topic,
@@ -168,6 +176,7 @@ function lineFactory(result: ScreenResponse) {
       fact,
       conflict: conflictOf(fact.sources),
       checks: checksOf(fact.sources),
+      ...(advice ? { advice } : {}),
     };
   };
   const gap = (topic: string, label: string, note?: string, action?: string, id = key()): Line => ({
@@ -184,8 +193,11 @@ function lineFactory(result: ScreenResponse) {
   return { line, gap, conflictOf, key };
 }
 
-const allergyTone = (fact: AssessedFact, topic = ""): Line["tone"] =>
-  ALLERGY.test(`${fact.label} ${fact.value} ${fact.detail ?? ""} ${topic}`) ? "allergy" : "plain";
+const isAllergy = (fact: AssessedFact) =>
+  ALLERGY.test(`${fact.label} ${fact.value} ${fact.detail ?? ""}`) ||
+  fact.sources.some((s) => ALLERGY.test(s.quote));
+
+const allergyTone = (fact: AssessedFact): Line["tone"] => (isAllergy(fact) ? "allergy" : "plain");
 
 /**
  * Where every line goes. Allergies and the blood thinner open the screen under Safety; a fixed
@@ -197,16 +209,26 @@ export function layoutScreen(result: ScreenResponse) {
   const checks = result.checks ?? [];
   const { contradictions } = result;
   const { line, gap, conflictOf, key } = lineFactory(result);
-  const basics = result.basics ?? { measures: [], allergies: [], problems: [] };
+  const basics = result.basics ?? { measures: [], allergies: [], problems: [], medication: [] };
 
   const documented = needs.filter((n) => n.status === "documented" && n.facts.length > 0);
   const items = documented.flatMap((need) => need.facts.map((fact) => ({ need, fact })));
-  const text = (f: AssessedFact) => `${f.label} ${f.value} ${f.detail ?? ""} ${f.drug?.name ?? ""}`;
-  const allergies = items.filter((i) => ALLERGY.test(`${text(i.fact)} ${i.need.title}`));
-  const thinner = items.find((i) => !allergies.includes(i) && THINNER.test(text(i.fact)));
+  const named = (f: AssessedFact) => {
+    const { name, brand = "" } = drugOf(f);
+    return `${name} ${brand} ${f.value}`;
+  };
+  const allergies = items.filter((i) => isAllergy(i.fact));
+  const thinner = items.find(
+    (i) => !allergies.includes(i) && isDrug(i.fact) && THINNER.test(named(i.fact)),
+  );
   const drugs = items.filter((i) => !allergies.includes(i) && i !== thinner && isDrug(i.fact));
   const used = new Set([...allergies, ...drugs, ...(thinner ? [thinner] : [])].map((i) => i.fact));
-  const onScreen = new Set(items.flatMap((i) => i.fact.sources.map((s) => s.passageId)));
+  const cited = new Set(items.flatMap((i) => i.fact.sources.map((s) => s.passageId)));
+  const listed = basics.medication.filter((f) => !f.sources.some((s) => cited.has(s.passageId)));
+  // What the screen shows elsewhere; a drug in the medication table carries the check as a chip.
+  const onScreen = new Set(
+    [...items.map((i) => i.fact), ...listed].flatMap((f) => f.sources.map((s) => s.passageId)),
+  );
 
   const thinnerLine = thinner && line("Blood thinner", thinner.fact);
   const safety = [
@@ -264,7 +286,10 @@ export function layoutScreen(result: ScreenResponse) {
 
   return {
     before: nonEmpty([{ title: "Safety", lines: safety }, ...checked, ...topics]),
-    drugs: drugs.map((i) => line("Medication", i.fact)),
+    drugs: [
+      ...drugs.map((i) => line("Medication", i.fact)),
+      ...listed.map((f) => line("Medication", f)),
+    ],
     after: nonEmpty([
       { title: "Not documented", lines: missing },
       { title: "Over time", lines: trends },
@@ -375,15 +400,18 @@ function LineIcon({ line }: { line: Line }) {
 }
 
 const CHIPS: Record<CheckKind, { text: string; title: string }> = {
-  surgery: { text: "pre-op", title: "On the fixed list of drugs to review before surgery" },
+  surgery: {
+    text: "pre-op",
+    title: "On the fixed list of drugs to reduce or pause before surgery",
+  },
   contrast: { text: "contrast", title: "On the fixed checklist before contrast imaging" },
 };
 
-function Chips({ kinds }: { kinds: CheckKind[] }) {
+function Chips({ kinds, advice }: { kinds: CheckKind[]; advice?: string | undefined }) {
   return kinds.map((kind) => (
     <span
       key={kind}
-      title={CHIPS[kind].title}
+      title={(kind === "surgery" && advice) || CHIPS[kind].title}
       className="ml-1.5 inline-block rounded-full bg-warning-wash px-1.5 py-px align-[1px] text-3xs font-medium text-warning"
     >
       {CHIPS[kind].text}
@@ -440,7 +468,7 @@ function LineRow({
         ) : (
           line.detail
         )}
-        <Chips kinds={line.checks} />
+        <Chips kinds={line.checks} advice={line.advice} />
         {line.conflict && <span className="text-warning"> · contradiction</span>}
       </span>
       <span
@@ -553,9 +581,11 @@ function MedicationTable({
                 <TriangleAlert className="size-3.5 text-warning" aria-label="In a contradiction" />
               )}
             </span>
-            <span className="min-w-0 truncate font-semibold">
-              {drug.name}
-              <Chips kinds={line.checks} />
+            <span className="flex min-w-0 items-baseline font-semibold">
+              <span className="truncate">{drug.name}</span>
+              <span className="shrink-0">
+                <Chips kinds={line.checks} advice={line.advice} />
+              </span>
             </span>
             <span className="tabular-nums">{drug.dose}</span>
             <span className="flex min-w-0 items-center gap-2 overflow-hidden">
@@ -693,7 +723,7 @@ function LinePane({
           variant="secondary"
           size="sm"
           className="mt-3"
-          onClick={() => onAsk(`What do the documents say about ${line.label}?`)}
+          onClick={() => onAsk(about(line.label))}
         >
           <MessageCircleQuestionMark className="size-3.5" aria-hidden />
           Ask about it
@@ -785,15 +815,37 @@ function Overview({
   );
 }
 
-/** A follow-up question to the record; the answer joins the screen as cited lines. */
-function AskBar({
-  inputRef,
+/** The question the pane and the ask suggestions put for a topic. */
+const about = (topic: string) => `What do the documents say about ${topic}?`;
+
+type Suggestion = { label: string; question: string };
+
+/** Up to three questions from what the screen could not fill, skipping those already asked. */
+function suggestionsOf(layout: Layout, answers: Answer[]): Suggestion[] {
+  const asked = new Set(answers.map((a) => a.question));
+  const topics = [
+    ...[...layout.before, ...layout.after].flatMap((s) => s.lines).filter((l) => l.tone === "gap"),
+    ...layout.leftOut,
+  ].map((l) => l.label);
+  return [...new Set(topics)]
+    .map((topic) => ({ label: `${topic}?`, question: about(topic) }))
+    .filter((s) => !asked.has(s.question))
+    .slice(0, 3);
+}
+
+/**
+ * A follow-up question to the record, floating over the foot of the list; the answer joins the
+ * screen as cited lines. While the field is empty and focused, the screen's gaps are offered.
+ */
+function AskDock({
+  suggestions,
   onAsk,
 }: {
-  inputRef: RefObject<HTMLInputElement | null>;
+  suggestions: Suggestion[];
   onAsk: (question: string) => void;
 }) {
   const [text, setText] = useState("");
+  const [focused, setFocused] = useState(false);
   const ready = text.trim().length >= 3;
   function submit(event: FormEvent) {
     event.preventDefault();
@@ -802,25 +854,66 @@ function AskBar({
     setText("");
   }
   return (
-    <form
-      onSubmit={submit}
-      className="mb-4 flex scroll-mt-4 items-center gap-2 rounded-[14px] bg-surface-2 py-1.5 pr-1.5 pl-3.5 transition-colors duration-150 focus-within:bg-hover/60"
-    >
-      <MessageCircleQuestionMark className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-      <input
-        ref={inputRef}
-        value={text}
-        maxLength={500}
-        onChange={(e) => setText(e.target.value)}
-        aria-label="Ask about her documents"
-        placeholder="Ask about her documents, such as: Was the carotid duplex repeated?"
-        className="min-w-0 flex-1 bg-transparent py-1 text-[13px] outline-none placeholder:text-muted-foreground focus-visible:shadow-none"
+    <div className="pointer-events-none sticky bottom-0 z-20 mt-10 flex flex-col items-center gap-2 @max-4xl:pb-4">
+      {/* Down past the column's bottom padding, to the edge of the panel. */}
+      <div
+        aria-hidden
+        className="absolute -inset-x-4 -top-12 -bottom-8 bg-[linear-gradient(transparent,var(--surface)_3rem)] sm:-inset-x-10 lg:-inset-x-14"
       />
-      <Button type="submit" size="sm" variant="secondary" disabled={!ready}>
-        Ask
-        <CornerDownLeft className="size-3" aria-hidden />
-      </Button>
-    </form>
+      {focused && !text && suggestions.length > 0 && (
+        <div className="ui-enter-up pointer-events-auto relative flex max-w-full flex-wrap justify-center gap-1.5">
+          {suggestions.map((s) => (
+            <button
+              key={s.question}
+              type="button"
+              // Keep the field focused, so the chips stay put until the click lands.
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => onAsk(s.question)}
+              title={s.question}
+              className="max-w-64 cursor-pointer truncate rounded-full bg-surface-2 px-2.5 py-[5px] text-xs transition-colors duration-150 hover:bg-hover"
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
+      )}
+      <form
+        onSubmit={submit}
+        className="pointer-events-auto relative flex w-full max-w-[560px] items-center gap-2.5 rounded-full bg-surface py-1.5 pr-1.5 pl-4 shadow-[0_8px_28px_rgb(0_0_0/0.10),0_2px_6px_rgb(0_0_0/0.05)] ring-1 ring-border transition-shadow duration-150 has-focus-visible:ring-2 has-focus-visible:ring-accent-text dark:shadow-[0_8px_28px_rgb(0_0_0/0.45)]"
+      >
+        <MessageCircleQuestionMark className="size-4 shrink-0 text-accent-text" aria-hidden />
+        <input
+          value={text}
+          maxLength={500}
+          onChange={(e) => setText(e.target.value)}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
+          onKeyDown={(e) => {
+            if (e.key !== "Escape") return;
+            // The field takes the Escape, so a selected line stays open.
+            e.preventDefault();
+            e.currentTarget.blur();
+          }}
+          aria-label="Ask about the documents"
+          placeholder="Ask the documents"
+          className="min-w-0 flex-1 bg-transparent py-1 text-sm outline-none placeholder:text-muted-foreground focus-visible:shadow-none"
+        />
+        {focused && <Keys keys={["esc"]} />}
+        <button
+          type="submit"
+          disabled={!ready}
+          aria-label="Ask"
+          className={cx(
+            "grid size-8 shrink-0 place-items-center rounded-full transition-colors duration-150",
+            ready
+              ? "cursor-pointer bg-accent text-accent-foreground"
+              : "bg-surface-2 text-muted-foreground",
+          )}
+        >
+          <ArrowUp className="size-4" aria-hidden />
+        </button>
+      </form>
+    </div>
   );
 }
 
@@ -918,7 +1011,7 @@ function AskedSection({
   );
 }
 
-/** What every screen shows about her, whatever the task: body measures, allergies, known problems. */
+/** What every screen shows about her, whatever the task: who she is and her body measures, allergies, known problems, one labelled row each. */
 function PatientStrip({
   patient,
   basics,
@@ -942,7 +1035,7 @@ function PatientStrip({
         .filter(Boolean)
         .join(" · ")}
       className={cx(
-        "inline-flex cursor-pointer items-center gap-1 rounded-md px-1 py-px transition-colors duration-150",
+        "-mx-1 inline-flex cursor-pointer items-center gap-1 rounded-md px-1 py-px transition-colors duration-150",
         selected === line.key ? "bg-accent-wash" : "hover:bg-surface-2",
       )}
     >
@@ -950,63 +1043,75 @@ function PatientStrip({
       {(line.conflict || monthsOld(line) !== undefined) && <LineIcon line={line} />}
     </button>
   );
-  const dot = (key: string) => (
-    <span key={key} aria-hidden className="px-0.5">
-      ·
-    </span>
+  /** The items of one row, a dot between each. */
+  const items = (nodes: ReactNode[]) =>
+    nodes.map((node, i) => (
+      // biome-ignore lint/suspicious/noArrayIndexKey: the rows never reorder
+      <Fragment key={i}>
+        {i > 0 && (
+          <span aria-hidden className="px-1.5 text-muted-foreground/60">
+            ·
+          </span>
+        )}
+        {node}
+      </Fragment>
+    ));
+  const row = (label: string, nodes: ReactNode[]) => (
+    <>
+      <dt className="text-muted-foreground">{label}</dt>
+      <dd className="flex min-w-0 flex-wrap items-center gap-y-0.5">{items(nodes)}</dd>
+    </>
   );
   const problems = all ? basics.problems : basics.problems.slice(0, FEW);
   return (
-    <div className="mt-2.5 flex flex-wrap items-center gap-x-0.5 gap-y-1 text-xs text-muted-foreground tabular-nums">
-      <span className="px-1">
-        <span className="font-medium text-foreground">{patient.name}</span> ·{" "}
-        <Sex sex={patient.sex} /> {patient.ageAsOf} y
-      </span>
-      {basics.measures.length > 0 && dot("measures")}
-      {basics.measures.map((line) =>
-        chip(
-          line,
-          <>
-            {line.label} <span className="font-medium text-foreground">{line.value}</span>
-          </>,
+    <dl className="mt-4 grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-x-5 gap-y-1.5 border-t border-border pt-3.5 text-xs text-foreground tabular-nums">
+      {row("Patient", [
+        <span key="name" className="font-medium">
+          {patient.name}
+        </span>,
+        <span key="age" className="inline-flex items-center gap-1">
+          <Sex sex={patient.sex} /> {patient.ageAsOf} y
+        </span>,
+        // Height and weight say what they are by their unit; BMI keeps its name.
+        ...basics.measures.map((line) =>
+          chip(line, line.label === "BMI" ? `BMI ${line.value}` : line.value),
         ),
-      )}
-      {basics.allergies.length > 0 && dot("allergies")}
-      {basics.allergies.map((line) =>
-        chip(
-          line,
-          line.tone === "absent" ? (
-            <>
-              Allergies <span className="font-medium text-foreground">{line.value}</span>
-            </>
-          ) : (
-            <span className="inline-flex items-center gap-1 font-medium text-destructive">
-              <ShieldAlert className="size-3" aria-label="Allergy" />
-              {line.label === "Allergy" ? line.value : line.label}
-            </span>
+      ])}
+      {basics.allergies.length > 0 &&
+        row(
+          "Allergies",
+          basics.allergies.map((line) =>
+            chip(
+              line,
+              line.tone === "absent" ? (
+                line.value
+              ) : (
+                <span className="inline-flex items-center gap-1 font-medium text-destructive">
+                  <ShieldAlert className="size-3" aria-hidden />
+                  {line.label === "Allergy" ? line.value : line.label}
+                </span>
+              ),
+            ),
           ),
-        ),
-      )}
-      {basics.problems.length > 0 && (
-        <>
-          {dot("problems")}
-          <span className="px-1">Known</span>
-        </>
-      )}
-      {problems.map((line) =>
-        chip(line, <span className="font-medium text-foreground">{line.label}</span>),
-      )}
-      {basics.problems.length > FEW && (
-        <button
-          type="button"
-          onClick={() => setAll(!all)}
-          aria-expanded={all}
-          className="cursor-pointer rounded-md px-1 py-px text-accent-text hover:underline"
-        >
-          {all ? "fewer" : `+${basics.problems.length - FEW}`}
-        </button>
-      )}
-    </div>
+        )}
+      {basics.problems.length > 0 &&
+        row("Problems", [
+          ...problems.map((line) => chip(line, line.label)),
+          ...(basics.problems.length > FEW
+            ? [
+                <button
+                  key="more"
+                  type="button"
+                  onClick={() => setAll(!all)}
+                  aria-expanded={all}
+                  className="cursor-pointer rounded-md text-accent-text hover:underline"
+                >
+                  {all ? "fewer" : `${basics.problems.length - FEW} more`}
+                </button>,
+              ]
+            : []),
+        ])}
+    </dl>
   );
 }
 
@@ -1020,7 +1125,7 @@ function Legend() {
   );
   return (
     <p className="flex flex-wrap items-center gap-x-3 gap-y-1">
-      {mark(<CircleDashed className="size-3" aria-hidden />, "n.d.: in none of her documents")}
+      {mark(<CircleDashed className="size-3" aria-hidden />, "n.d.: in none of the documents")}
       {mark(<CircleSlash className="size-3" aria-hidden />, "documented as absent")}
       {mark(
         <Clock className="size-3 text-warning" aria-hidden />,
@@ -1086,7 +1191,7 @@ export function ScreenView({
   const clarify = result.clarify ?? [];
   const [answers, setAnswers] = useStored<Answer[]>(answersKey(result.id), []);
   const [asking, setAsking] = useState<Asking[]>([]);
-  const askInput = useRef<HTMLInputElement>(null);
+  const askedTop = useRef<HTMLDivElement>(null);
   const make = useMemo(() => lineFactory(result), [result]);
   const asked = answers.map((answer) => ({ answer, lines: answerLines(make, answer) }));
   const noted = notes.map(noteLine);
@@ -1111,10 +1216,10 @@ export function ScreenView({
   async function ask(text: string) {
     const question = text.trim();
     if (question.length < 3 || asking.some((a) => a.question === question && !a.error)) return;
-    askInput.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    askedTop.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
     setAsking((list) => [{ question }, ...list.filter((a) => a.question !== question)]);
     try {
-      const answer = await api.answer(screen.situation, question);
+      const answer = await api.answer(patient.id, screen.situation, question);
       setAnswers((list) => [answer, ...list.filter((a) => a.id !== answer.id)]);
       setAsking((list) => list.filter((a) => a.question !== question));
     } catch (e) {
@@ -1166,13 +1271,15 @@ export function ScreenView({
     >
       <div className="min-w-0 flex-1 px-4 py-8 sm:px-10 lg:px-14 @4xl:overflow-y-auto @4xl:[scrollbar-gutter:stable]">
         <div className="mx-auto max-w-[880px]">
-          <header className="flex flex-wrap items-center gap-x-3 gap-y-2">
-            <RoleChip role={screen.role} onRole={onRole} />
-            <h1 className="text-xl leading-snug font-semibold tracking-tight">{screen.task}</h1>
-            {screen.occasion && (
-              <p className="min-w-0 truncate text-sm text-muted-foreground">{screen.occasion}</p>
-            )}
-            <div className="ml-auto flex items-center gap-1">
+          <header className="flex items-start gap-3">
+            <div className="min-w-0 flex-1">
+              <h1 className="text-xl leading-snug font-semibold tracking-tight">{screen.task}</h1>
+              <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px] text-muted-foreground">
+                <RoleChip role={screen.role} onRole={onRole} />
+                {screen.occasion && <p className="min-w-0">{screen.occasion}</p>}
+              </div>
+            </div>
+            <div className="flex shrink-0 items-center gap-1">
               <RecordSearch documents={patient.documents} onOpen={onOpenLetter} />
               <Button
                 variant="ghost"
@@ -1204,7 +1311,8 @@ export function ScreenView({
           />
 
           <div className="@container/list mt-6 min-w-0">
-            <AskBar inputRef={askInput} onAsk={(question) => void ask(question)} />
+            {/* Where a new answer appears; asking scrolls it into view. */}
+            <div ref={askedTop} className="scroll-mt-6" />
             <div className="@xl/list:grid @xl/list:grid-cols-[14px_fit-content(128px)_fit-content(176px)_minmax(0,1fr)_auto] @xl/list:gap-x-2.5">
               <AskedSection
                 asked={asked}
@@ -1279,6 +1387,10 @@ export function ScreenView({
               <Legend />
             </div>
           </div>
+          <AskDock
+            suggestions={suggestionsOf(layout, answers)}
+            onAsk={(question) => void ask(question)}
+          />
         </div>
       </div>
 

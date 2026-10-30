@@ -8,6 +8,8 @@ export type ThemePreference = Theme | "system";
 export const THEME_KEY = "clinical-screen:theme";
 export const SIDEBAR_KEY = "clinical-screen:sidebar-collapsed";
 export const SCREENS_KEY = "clinical-screen:screens";
+/** The patient picked last, shown again on the next visit. */
+export const PATIENT_KEY = "clinical-screen:patient";
 export const SIDEBAR_WIDTH_KEY = "clinical-screen:sidebar-width";
 export const DETAIL_WIDTH_KEY = "clinical-screen:detail-width";
 export const DOCUMENT_PANE_KEY = "clinical-screen:document-pane";
