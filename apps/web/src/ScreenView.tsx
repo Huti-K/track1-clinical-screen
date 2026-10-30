@@ -11,6 +11,7 @@ import type {
 } from "@track1/shared";
 import {
   ArrowUp,
+  CalendarDays,
   Check,
   ChevronDown,
   CircleDashed,
@@ -18,6 +19,7 @@ import {
   ClipboardCopy,
   Clock,
   EyeOff,
+  FileText,
   MessageCircleQuestionMark,
   NotebookPen,
   ShieldAlert,
@@ -1011,7 +1013,7 @@ function AskedSection({
   );
 }
 
-/** What every screen shows about her, whatever the task: who she is and her body measures, allergies, known problems, one labelled row each. */
+/** What every screen shows about her, whatever the task: who she is, her body measures, allergies and known problems, a labelled column each. */
 function PatientStrip({
   patient,
   basics,
@@ -1024,7 +1026,7 @@ function PatientStrip({
   onSelect: (key: string) => void;
 }) {
   const [all, setAll] = useState(false);
-  const FEW = 5;
+  const FEW = 7;
   const chip = (line: Line, content: ReactNode) => (
     <button
       key={line.key}
@@ -1035,7 +1037,7 @@ function PatientStrip({
         .filter(Boolean)
         .join(" · ")}
       className={cx(
-        "-mx-1 inline-flex cursor-pointer items-center gap-1 rounded-md px-1 py-px transition-colors duration-150",
+        "-mx-1 inline-flex cursor-pointer items-center gap-1 rounded-md px-1 transition-colors duration-150",
         selected === line.key ? "bg-accent-wash" : "hover:bg-surface-2",
       )}
     >
@@ -1043,75 +1045,102 @@ function PatientStrip({
       {(line.conflict || monthsOld(line) !== undefined) && <LineIcon line={line} />}
     </button>
   );
-  /** The items of one row, a dot between each. */
-  const items = (nodes: ReactNode[]) =>
-    nodes.map((node, i) => (
-      // biome-ignore lint/suspicious/noArrayIndexKey: the rows never reorder
-      <Fragment key={i}>
-        {i > 0 && (
-          <span aria-hidden className="px-1.5 text-muted-foreground/60">
-            ·
-          </span>
-        )}
-        {node}
-      </Fragment>
-    ));
-  const row = (label: string, nodes: ReactNode[]) => (
-    <>
-      <dt className="text-muted-foreground">{label}</dt>
-      <dd className="flex min-w-0 flex-wrap items-center gap-y-0.5">{items(nodes)}</dd>
-    </>
+  const dot = <span className="px-1 text-muted-foreground">·</span>;
+  const column = (label: string, value: ReactNode, detail?: ReactNode, danger = false) => (
+    <div className="min-w-0 @3xl/strip:px-[18px] @3xl/strip:first:pl-0">
+      <p className={cx("mb-[3px] text-2xs", danger ? "text-destructive" : "text-muted-foreground")}>
+        {label}
+      </p>
+      <div className="flex flex-wrap items-center text-sm leading-5 font-medium">{value}</div>
+      {detail && (
+        <div className="mt-0.5 flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
+          {detail}
+        </div>
+      )}
+    </div>
   );
+
+  // Height and weight say what they are by their unit; BMI keeps its name, on the line below.
+  const bmi = basics.measures.find((line) => line.label === "BMI");
+  const body = basics.measures.filter((line) => line !== bmi);
+  const measured = basics.measures
+    .map((line) => line.date)
+    .filter(Boolean)
+    .sort()
+    .at(-1);
+  const allergic = basics.allergies.some((line) => line.tone !== "absent");
+  const [allergy] = basics.allergies;
   const problems = all ? basics.problems : basics.problems.slice(0, FEW);
   return (
-    <dl className="mt-4 grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-x-5 gap-y-1.5 border-t border-border pt-3.5 text-xs text-foreground tabular-nums">
-      {row("Patient", [
-        <span key="name" className="font-medium">
-          {patient.name}
-        </span>,
-        <span key="age" className="inline-flex items-center gap-1">
-          <Sex sex={patient.sex} /> {patient.ageAsOf} y
-        </span>,
-        // Height and weight say what they are by their unit; BMI keeps its name.
-        ...basics.measures.map((line) =>
-          chip(line, line.label === "BMI" ? `BMI ${line.value}` : line.value),
-        ),
-      ])}
-      {basics.allergies.length > 0 &&
-        row(
-          "Allergies",
-          basics.allergies.map((line) =>
-            chip(
-              line,
-              line.tone === "absent" ? (
-                line.value
-              ) : (
-                <span className="inline-flex items-center gap-1 font-medium text-destructive">
-                  <ShieldAlert className="size-3" aria-hidden />
-                  {line.label === "Allergy" ? line.value : line.label}
-                </span>
-              ),
-            ),
-          ),
+    <div className="mt-[22px] border-t border-border pt-3.5 @container/strip">
+      <div className="grid grid-cols-2 gap-x-6 gap-y-4 tabular-nums @3xl/strip:grid-cols-[auto_auto_auto_minmax(0,1fr)] @3xl/strip:gap-x-0 @3xl/strip:divide-x @3xl/strip:divide-border">
+        {column(
+          "Patient",
+          patient.name,
+          <>
+            <Sex sex={patient.sex} /> {patient.ageAsOf} y · born {formatDate(patient.dateOfBirth)}
+          </>,
         )}
-      {basics.problems.length > 0 &&
-        row("Problems", [
-          ...problems.map((line) => chip(line, line.label)),
-          ...(basics.problems.length > FEW
-            ? [
+        {basics.measures.length > 0 &&
+          column(
+            "Body",
+            body.length > 0
+              ? body.map((line, i) => (
+                  <Fragment key={line.key}>
+                    {i > 0 && dot}
+                    {chip(line, line.value)}
+                  </Fragment>
+                ))
+              : bmi && chip(bmi, `BMI ${bmi.value}`),
+            (body.length > 0 && bmi) || measured ? (
+              <>
+                {body.length > 0 && bmi && chip(bmi, `BMI ${bmi.value}`)}
+                {body.length > 0 && bmi && measured && " · "}
+                {measured && monthYear(measured)}
+              </>
+            ) : undefined,
+          )}
+        {allergy &&
+          column(
+            basics.allergies.length > 1 ? "Allergies" : "Allergy",
+            basics.allergies.map((line, i) => (
+              <Fragment key={line.key}>
+                {i > 0 && dot}
+                {chip(
+                  line,
+                  line.tone === "absent" ? (
+                    line.value
+                  ) : (
+                    <span className="inline-flex items-center gap-1.5 text-destructive">
+                      <ShieldAlert className="size-3.5" aria-hidden />
+                      {line.label === "Allergy" ? line.value : line.label}
+                    </span>
+                  ),
+                )}
+              </Fragment>
+            )),
+            basics.allergies.length === 1 && allergy.detail?.trim(),
+            allergic,
+          )}
+        {basics.problems.length > 0 &&
+          column(
+            "Problems",
+            <span className="flex flex-wrap gap-x-2.5 text-[13px] font-normal">
+              {problems.map((line) => chip(line, line.label))}
+              {basics.problems.length > FEW && (
                 <button
-                  key="more"
                   type="button"
                   onClick={() => setAll(!all)}
                   aria-expanded={all}
-                  className="cursor-pointer rounded-md text-accent-text hover:underline"
+                  className="cursor-pointer text-accent-text hover:underline"
                 >
-                  {all ? "fewer" : `${basics.problems.length - FEW} more`}
-                </button>,
-              ]
-            : []),
-        ])}
-    </dl>
+                  {all ? "fewer" : `+${basics.problems.length - FEW}`}
+                </button>
+              )}
+            </span>,
+          )}
+      </div>
+    </div>
   );
 }
 
@@ -1273,10 +1302,21 @@ export function ScreenView({
         <div className="mx-auto max-w-[880px]">
           <header className="flex items-start gap-3">
             <div className="min-w-0 flex-1">
-              <h1 className="text-xl leading-snug font-semibold tracking-tight">{screen.task}</h1>
-              <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px] text-muted-foreground">
+              <h1 className="text-[22px] leading-snug font-semibold tracking-tight">
+                {screen.task}
+              </h1>
+              <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px] text-muted-foreground">
                 <RoleChip role={screen.role} onRole={onRole} />
-                {screen.occasion && <p className="min-w-0">{screen.occasion}</p>}
+                {screen.occasion && (
+                  <span className="inline-flex min-w-0 items-center gap-1.5">
+                    <CalendarDays className="size-3.5 shrink-0" aria-hidden />
+                    {screen.occasion}
+                  </span>
+                )}
+                <span className="inline-flex items-center gap-1.5">
+                  <FileText className="size-3.5 shrink-0" aria-hidden />
+                  {patient.documents.length} documents to {formatDate(patient.asOf)}
+                </span>
               </div>
             </div>
             <div className="flex shrink-0 items-center gap-1">
