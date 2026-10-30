@@ -1,4 +1,4 @@
-import { Loader } from "lucide-react";
+import { Loader, Mars, Venus } from "lucide-react";
 import type { ButtonHTMLAttributes, ReactNode } from "react";
 
 export function cx(...classes: (string | false | null | undefined)[]): string {
@@ -83,6 +83,43 @@ export function Badge({
   );
 }
 
+/** A person's initials on a pale accent disc. */
+export function Avatar({ name, className }: { name: string; className?: string }) {
+  const initials = name
+    .split(/\s+/)
+    .map((word) => word[0] ?? "")
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+  return (
+    <span
+      aria-hidden
+      className={cx(
+        "flex size-[34px] shrink-0 items-center justify-center rounded-full bg-accent-wash text-xs font-semibold text-accent-text",
+        className,
+      )}
+    >
+      {initials}
+    </span>
+  );
+}
+
+/** The keys of a shortcut, each on its own small tile. */
+export function Keys({ keys }: { keys: string[] }) {
+  return (
+    <span className="flex shrink-0 gap-0.5">
+      {keys.map((key) => (
+        <kbd
+          key={key}
+          className="inline-grid h-5 min-w-5 place-items-center rounded-[5px] bg-surface-2 px-1 font-sans text-2xs text-muted-foreground"
+        >
+          {key}
+        </kbd>
+      ))}
+    </span>
+  );
+}
+
 /** A section's title: small, semibold and tight, with an optional count. */
 export function GroupLabel({ children, aside }: { children: ReactNode; aside?: ReactNode }) {
   return (
@@ -112,10 +149,30 @@ export function ErrorText({
   );
 }
 
+/** DD.MM.YYYY, as German clinical records write dates. */
 export function formatDate(iso: string): string {
-  return new Date(`${iso}T00:00:00`).toLocaleDateString("en-GB", {
-    day: "numeric",
-    month: "short",
+  return new Date(`${iso}T00:00:00`).toLocaleDateString("de-DE", {
+    day: "2-digit",
+    month: "2-digit",
     year: "numeric",
   });
+}
+
+const SEX_ICONS = { female: Venus, male: Mars } as const;
+
+/** The patient's sex as its symbol, named for screen readers; any other value stays text. */
+export function Sex({ sex, className }: { sex: string; className?: string }) {
+  const Icon = SEX_ICONS[sex.toLowerCase() as keyof typeof SEX_ICONS];
+  if (!Icon) return <span className={cx("capitalize", className)}>{sex}</span>;
+  const name = sex.charAt(0).toUpperCase() + sex.slice(1).toLowerCase();
+  return (
+    <span
+      role="img"
+      aria-label={name}
+      title={name}
+      className={cx("inline-flex align-[-0.125em]", className)}
+    >
+      <Icon aria-hidden className="size-[1em]" />
+    </span>
+  );
 }

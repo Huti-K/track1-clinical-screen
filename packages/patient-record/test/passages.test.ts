@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { passageSays, splitPassages } from "../src/index.js";
+import { passageSays, splitLetter, splitPassages } from "../src/index.js";
 
 // Shaped like the hackathon letters: <BR> line breaks, HTML entities, hard-wrapped prose, tables.
 const LETTER = [
@@ -50,6 +50,90 @@ describe("splitPassages", () => {
     expect(splitPassages("9", prose).map((p) => p.text)).toEqual([
       "Diagnose: Tiefe Beinvenenthrombose li. Unterschenkel mit Verschluss der V. poplitea sin., Ödem bds. Die Beschwerden waren bei Aufnahme bereits rückläufig.",
       "Im Aufnahmestatus fanden sich keine Zeichen einer Lungenembolie.",
+    ]);
+  });
+});
+
+describe("splitLetter", () => {
+  it("sets a discharge letter out as it prints, the lab enclosure after the signature on a new page", () => {
+    const letter = [
+      "ORTXXX, am 03.02.2021",
+      "",
+      "Frau",
+      "Beispielpatientin",
+      "Straße XY/AB",
+      "PLZ Ort",
+      "",
+      "Diagnosen:",
+      "Chronische Herzinsuffizienz",
+      "Diab. Mell. II",
+      "",
+      "Entlassungsmedikation:",
+      "Applikation mo mi ab na Einheit Info",
+      "Ramipril 5mg oral 1 0 1/2 0 ST",
+      "Clexane Injektionslösung 40 mg s.c. 0 0 1 0 Dosen",
+      "Methotrexat 10mg oral 1x/Woche 1 Tabl.",
+      "Mit freundlichen Grüßen",
+      "",
+      " OA XYZ Prim. Dr. X.",
+      "",
+      "Laborbefund",
+      "",
+      "NN_9999-0001 VN_9999-0001 | geb. 01.02.1960",
+    ].join("<BR>");
+
+    expect(splitLetter("7", letter).layout).toEqual([
+      { kind: "date", spaced: false, lines: [["7-1"]] },
+      { kind: "address", spaced: true, lines: [["7-2"], ["7-3"], ["7-4"], ["7-5"]] },
+      { kind: "heading", spaced: true, lines: [["7-6"]] },
+      { kind: "text", spaced: false, lines: [["7-7"], ["7-8"]] },
+      { kind: "heading", spaced: true, lines: [["7-9"]] },
+      {
+        kind: "table",
+        spaced: false,
+        head: {
+          passageId: "7-10",
+          cells: ["", "Applikation", "mo", "mi", "ab", "na", "Einheit", "Info"],
+        },
+        rows: [
+          { passageId: "7-11", cells: ["Ramipril 5mg", "oral", "1", "0", "1/2", "0", "ST"] },
+          {
+            passageId: "7-12",
+            cells: ["Clexane Injektionslösung 40 mg", "s.c.", "0", "0", "1", "0", "Dosen"],
+          },
+          // A weekly drug has no four doses; the rest of its row stays one cell.
+          { passageId: "7-13", cells: ["Methotrexat 10mg", "oral", "1x/Woche 1 Tabl."] },
+        ],
+      },
+      { kind: "closing", spaced: false, lines: [["7-14"]] },
+      { kind: "signature", spaced: true, lines: [["7-15"]] },
+      { kind: "title", spaced: true, newPage: true, lines: [["7-16"]] },
+      { kind: "text", spaced: true, lines: [["7-17"]] },
+    ]);
+  });
+
+  it("tells a finding's title from a heading over lines, and keeps a long line's sentences on one line", () => {
+    const finding = [
+      "Frau",
+      "Beispielpatientin",
+      "",
+      "OrtXX, am 14.09.2020",
+      "",
+      "Radiologischer Befund",
+      "",
+      "Gesamtbeurteilung",
+      "Diagnose: Tiefe Beinvenenthrombose li. Unterschenkel mit Verschluss der V. poplitea sin., Ödem bds. Die Beschwerden waren bei Aufnahme bereits rückläufig. Im Aufnahmestatus fanden sich keine Zeichen einer Lungenembolie.",
+      "",
+      "Befund: Dr. Arzt",
+    ].join("<BR>");
+
+    expect(splitLetter("9", finding).layout).toEqual([
+      { kind: "address", spaced: false, lines: [["9-1"], ["9-2"]] },
+      { kind: "date", spaced: true, lines: [["9-3"]] },
+      { kind: "title", spaced: true, lines: [["9-4"]] },
+      { kind: "heading", spaced: true, lines: [["9-5"]] },
+      { kind: "text", spaced: false, lines: [["9-6", "9-7"]] },
+      { kind: "text", spaced: true, lines: [["9-8"]] },
     ]);
   });
 });

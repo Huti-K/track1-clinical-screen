@@ -4,6 +4,7 @@ import {
   type ModelThinkingLevel as ThinkingLevel,
 } from "@earendil-works/pi-ai/providers/model-schema";
 import type { ModelRef } from "@earendil-works/pi-durable";
+import type { Retrieval } from "./agent/clinical.js";
 
 const root = resolve(import.meta.dirname, "../../..");
 
@@ -26,11 +27,22 @@ export const config = {
   deviceIdPath: resolve(root, ".data/device-id"),
   webDist: resolve(root, "apps/web/dist"),
   /** ChatGPT sign-in by default; any pi-ai provider with its API key in .env works too. */
-  model: parseModel(process.env.MODEL ?? "openai-codex/gpt-6-luna"),
+  model: parseModel(process.env.MODEL ?? "openai-codex/gpt-6.1-terra"),
+  /** Builds the fact index and finds contradictions once per store; default the screen model. */
+  backgroundModel: process.env.BACKGROUND_MODEL
+    ? parseModel(process.env.BACKGROUND_MODEL)
+    : undefined,
   /** Reasoning effort per job: screens must be fast, the one-off contradiction scan thorough. */
-  screenThinking: thinking(process.env.SCREEN_THINKING, "off"),
-  scanThinking: thinking(process.env.SCAN_THINKING, "medium"),
+  screenThinking: thinking(process.env.SCREEN_THINKING, "low"),
+  scanThinking: thinking(process.env.SCAN_THINKING, "high"),
+  retrieval: retrieval(process.env.RETRIEVAL),
 };
+
+function retrieval(value = "index"): Retrieval {
+  if (value !== "context" && value !== "tools" && value !== "hybrid" && value !== "index")
+    throw new Error(`RETRIEVAL must be context, tools, hybrid or index, got "${value}".`);
+  return value;
+}
 
 function thinking(value: string | undefined, fallback: ThinkingLevel): ThinkingLevel {
   if (value === undefined) return fallback;

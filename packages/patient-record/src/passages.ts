@@ -1,4 +1,5 @@
-import type { Passage } from "@track1/shared";
+import type { LetterBlock, Passage } from "@track1/shared";
+import { headingOf, type LetterLine, layoutLetter } from "./layout.js";
 
 const ENTITIES: Record<string, string> = {
   amp: "&",
@@ -47,21 +48,18 @@ function sentences(line: string): string[] {
   return parts.filter(Boolean);
 }
 
-/** A heading line such as `Entlassungsmedikation:` names the section of the lines below it. */
-function headingOf(line: string): string | undefined {
-  const match = /^([^:]{2,60}):$/.exec(line);
-  return match?.[1]?.trim();
-}
-
 /**
- * The document text as citable passages: one per sentence, list line or table row, in order. IDs
- * are `<documentId>-<n>` and stay stable as long as the text does.
+ * The document's passages and the layout that sets them on the page as the letter prints them.
+ * The layout comes from the line breaks and blank lines the passages leave out.
  */
-export function splitPassages(documentId: string, raw: string): Passage[] {
+export function splitLetter(
+  documentId: string,
+  raw: string,
+): { passages: Passage[]; layout: LetterBlock[] } {
   const lines = decodeEntities(raw)
     .split(/<br\s*\/?>/i)
     .map((line) => line.replace(/\s+/g, " ").trim());
-  const merged: { text: string; section: string }[] = [];
+  const merged: { text: string; section: string; spaced: boolean }[] = [];
   let section = "";
   let blank = false;
   for (const line of lines) {
@@ -73,13 +71,29 @@ export function splitPassages(documentId: string, raw: string): Passage[] {
     if (previous && continues(previous.text, line, blank)) previous.text += ` ${line}`;
     else {
       section = headingOf(line) ?? section;
-      merged.push({ text: line, section });
+      merged.push({ text: line, section, spaced: blank });
     }
     blank = false;
   }
-  return merged
-    .flatMap((line) => sentences(line.text).map((text) => ({ text, section: line.section })))
-    .map((passage, index) => ({ id: `${documentId}-${index + 1}`, documentId, ...passage }));
+  const passages: Passage[] = [];
+  const laid: LetterLine[] = merged.map((line) => ({
+    text: line.text,
+    spaced: line.spaced,
+    ids: sentences(line.text).map((text) => {
+      const id = `${documentId}-${passages.length + 1}`;
+      passages.push({ id, documentId, text, section: line.section });
+      return id;
+    }),
+  }));
+  return { passages, layout: layoutLetter(laid) };
+}
+
+/**
+ * The document text as citable passages: one per sentence, list line or table row, in order. IDs
+ * are `<documentId>-<n>` and stay stable as long as the text does.
+ */
+export function splitPassages(documentId: string, raw: string): Passage[] {
+  return splitLetter(documentId, raw).passages;
 }
 
 function normalize(text: string): string {

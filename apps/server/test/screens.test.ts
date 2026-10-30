@@ -13,7 +13,7 @@ import {
 import { MemoryStorage, type Storage } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { loadPatientRecord } from "@track1/patient-record";
-import type { ScreenResponse } from "@track1/shared";
+import type { Answer, Note, ScreenResponse } from "@track1/shared";
 import type { FastifyInstance } from "fastify";
 import { afterEach, describe, expect, it } from "vitest";
 import { ClinicalRuntime } from "../src/agent/runtime.js";
@@ -67,8 +67,81 @@ function screenArgs(aspirinQuote: string): JsonObject {
   };
 }
 
-/** Answers like a model would: the contradiction scan gets its report, a screen gets `screen(attempt)`. */
-function scriptedModels(screen: (attempt: number) => JsonObject) {
+/** What the fact index builder extracts from the fixture; f2 and f3 claim more than their quotes. */
+const INDEX: JsonObject = {
+  facts: [
+    {
+      category: "allergy",
+      label: "Contrast media",
+      value: "Contrast media allergy with nausea and vomiting",
+      detail: " nausea, vomiting ",
+      date: "2019-06-28",
+      sources: [{ passage: "D1-2", quote: "KM-Allergie (Übelkeit, Erbrechen)" }],
+    },
+    {
+      category: "medication",
+      label: "Aspirin (Thrombo ASS)",
+      value: "100 mg orally, 1-0-0, started after a stroke",
+      detail: "",
+      date: "2019-06-28",
+      drug: { name: "Aspirin", brand: "Thrombo ASS", dose: "100 mg", schedule: "1-0-0", route: "" },
+      sources: [{ passage: "D1-9", quote: "Thrombo ASS 100mg oral 1 0 0 0" }],
+    },
+    {
+      category: "measurement",
+      label: "BMI",
+      value: "BMI 33.5, obese since childhood",
+      date: "2019-06-28",
+      sources: [{ passage: "D1-6", quote: "BMI: 33.5" }],
+    },
+    {
+      category: "diagnosis",
+      label: "T2DM",
+      value: "Type 2 diabetes",
+      date: "2019-06-28",
+      sources: [{ passage: "D1-15", quote: "Diab. mell. Typ II" }],
+    },
+    {
+      category: "diagnosis",
+      label: "HTN",
+      value: "Arterial hypertension",
+      date: "2019-06-28",
+      sources: [{ passage: "D1-16", quote: "Art. Hypertonie" }],
+    },
+    {
+      category: "diagnosis",
+      label: "T2DM",
+      value: "Type 2 diabetes",
+      date: "2020-04-05",
+      sources: [{ passage: "D2-6", quote: "Diab. mell. Typ II" }],
+    },
+    {
+      category: "diagnosis",
+      label: "Pneumonia",
+      value: "Ruled out",
+      date: "2020-04-05",
+      sources: [{ passage: "D2-7", quote: "Pneumonie ausgeschlossen" }],
+    },
+  ],
+};
+
+/** The review of INDEX: f2 is corrected, f3 has no support and leaves the index. */
+const REVIEW: JsonObject = {
+  reviews: [
+    { id: "f1", verdict: "supported" },
+    { id: "f2", verdict: "corrected", value: "100 mg orally, 1-0-0" },
+    { id: "f3", verdict: "unsupported" },
+    ...["f4", "f5", "f6", "f7"].map((id) => ({ id, verdict: "supported" })),
+  ],
+};
+
+type Script = (attempt: number) => JsonObject;
+
+/**
+ * Answers like a model would: the index builder gets INDEX, its review REVIEW, the contradiction
+ * scan its report, a screen gets `screen(attempt)` and a follow-up question `answer(attempt)`.
+ */
+function scriptedModels(screen: Script, answer?: Script) {
   const faux = fauxProvider({ provider: "faux", models: [{ id: "clinic-1" }] });
   const respond: FauxResponseFactory = (context) => {
     const tools = getCurrentTools(context.messages).map((tool) => tool.name);
@@ -76,7 +149,15 @@ function scriptedModels(screen: (attempt: number) => JsonObject) {
       return fauxAssistantMessage(fauxToolCall("report_contradictions", BMI_CONTRADICTION), {
         stopReason: "toolUse",
       });
+    if (tools.includes("submit_index"))
+      return fauxAssistantMessage(fauxToolCall("submit_index", INDEX), { stopReason: "toolUse" });
+    if (tools.includes("submit_review"))
+      return fauxAssistantMessage(fauxToolCall("submit_review", REVIEW), { stopReason: "toolUse" });
     const attempt = context.messages.filter((m) => m.role === "toolResult").length + 1;
+    if (tools.includes("submit_answer") && answer)
+      return fauxAssistantMessage(fauxToolCall("submit_answer", answer(attempt)), {
+        stopReason: "toolUse",
+      });
     return fauxAssistantMessage(fauxToolCall("submit_screen", screen(attempt)), {
       stopReason: "toolUse",
     });
@@ -94,23 +175,29 @@ function scriptedModels(screen: (attempt: number) => JsonObject) {
 
 const open: { app: FastifyInstance; runtime: ClinicalRuntime }[] = [];
 
-async function start(storage: Storage, screen: (attempt: number) => JsonObject) {
+async function start(
+  storage: Storage,
+  screen: Script,
+  retrieval: "context" | "index" = "context",
+  answer?: Script,
+) {
   const runtime = await ClinicalRuntime.open({
     storage,
-    models: scriptedModels(screen),
+    models: scriptedModels(screen, answer),
     model: { provider: "faux", modelId: "clinic-1" },
     record: await loadPatientRecord(FIXTURE),
+    retrieval,
   });
   const app = await buildApp(runtime);
   open.push({ app, runtime });
   return app;
 }
 
-async function postScreen(app: FastifyInstance): Promise<ScreenResponse> {
+async function postScreen(app: FastifyInstance, situation = SITUATION): Promise<ScreenResponse> {
   const response = await app.inject({
     method: "POST",
     url: "/api/screens",
-    payload: { situation: SITUATION },
+    payload: { situation },
   });
   expect(response.statusCode).toBe(200);
   return response.json<ScreenResponse>();
@@ -148,8 +235,15 @@ describe("POST /api/screens", () => {
       status: "not_documented",
       facts: [],
     });
+    // The model reports the BMI mismatch too; the arithmetic check finds it and keeps one copy.
     expect(contradictions).toHaveLength(1);
-    expect(contradictions[0]?.passages.map((p) => p.passageId)).toEqual(["D1-6", "D1-4", "D1-5"]);
+    expect(contradictions[0]).toMatchObject({ method: "rule", relevant: false });
+    expect(contradictions[0]?.summary).toContain("30.9");
+    expect(contradictions[0]?.passages.map((p) => p.passageId).sort()).toEqual([
+      "D1-4",
+      "D1-5",
+      "D1-6",
+    ]);
 
     const document = await app.inject({ method: "GET", url: "/api/documents/D1" });
     const cited = document.json<{ passages: { id: string; text: string }[] }>().passages;
@@ -188,6 +282,216 @@ describe("POST /api/screens", () => {
     }
   });
 
+  it("serves screens from the reviewed index, picked by ID rather than rewritten", async () => {
+    // One submission picks the fact the review removed and rewrites an indexed passage itself.
+    const app = await start(
+      new MemoryStorage(),
+      () => ({
+        role: "Anaesthetist",
+        task: "Pre-operative check",
+        needs: [
+          {
+            title: "Blood thinners and allergies",
+            status: "documented",
+            factIds: ["f1", "f3"],
+            facts: [
+              {
+                label: "Aspirin",
+                value: "Aspirin 100 mg daily",
+                sources: [{ passage: "D1-9", quote: "Thrombo ASS 100mg" }],
+              },
+            ],
+          },
+        ],
+      }),
+      "index",
+    );
+
+    const { screen } = await postScreen(app);
+
+    // f3 left the index in its review; the rewritten aspirin becomes f2 as the review corrected it.
+    expect(screen.needs[0]?.facts.map((f) => [f.value, f.sources[0]?.passageId])).toEqual([
+      ["Contrast media allergy with nausea and vomiting", "D1-2"],
+      ["100 mg orally, 1-0-0", "D1-9"],
+    ]);
+    // A picked fact keeps its parts, trimmed, without the empty ones.
+    const [allergy, aspirin] = screen.needs[0]?.facts ?? [];
+    expect(allergy).toMatchObject({ detail: "nausea, vomiting", date: "2019-06-28" });
+    expect(aspirin?.drug).toEqual({
+      name: "Aspirin",
+      brand: "Thrombo ASS",
+      dose: "100 mg",
+      schedule: "1-0-0",
+    });
+    expect(aspirin).not.toHaveProperty("detail");
+  });
+
+  it("keeps the occasion and the detail, date and drug parts of a fact the screen writes", async () => {
+    const app = await start(new MemoryStorage(), () => ({
+      role: "Anaesthetist",
+      task: "Pre-operative check",
+      occasion: " Hip surgery, 16 May 2020 ",
+      needs: [
+        {
+          title: "Blood thinners",
+          status: "documented",
+          facts: [
+            {
+              label: "Antiplatelet",
+              value: "Aspirin 100 mg",
+              detail: "1-0-0, oral",
+              date: "2019-06-28",
+              drug: { name: "Aspirin", brand: "Thrombo ASS", dose: "100 mg", schedule: "1-0-0" },
+              sources: [{ passage: "D1-9", quote: "Thrombo ASS 100mg oral 1 0 0 0" }],
+            },
+          ],
+        },
+      ],
+    }));
+
+    const { screen } = await postScreen(app);
+
+    expect(screen.occasion).toBe("Hip surgery, 16 May 2020");
+    expect(screen.needs[0]?.facts[0]).toMatchObject({
+      value: "Aspirin 100 mg",
+      detail: "1-0-0, oral",
+      date: "2019-06-28",
+      drug: { name: "Aspirin", brand: "Thrombo ASS", dose: "100 mg", schedule: "1-0-0" },
+    });
+  });
+
+  it("charts a measurement the screen cites across every document that states it", async () => {
+    const app = await start(new MemoryStorage(), () => ({
+      role: "General practitioner",
+      task: "Diabetes review",
+      needs: [
+        {
+          title: "Weight",
+          status: "documented",
+          facts: [
+            {
+              label: "Weight",
+              value: "79 kg (Apr 2020)",
+              sources: [{ passage: "D2-3", quote: "Gewicht: 79 kg" }],
+            },
+          ],
+        },
+      ],
+    }));
+
+    const { trends, passages } = await postScreen(app);
+
+    // 84 kg in June 2019 and 79 kg in April 2020; one blood pressure is no trend.
+    expect(trends).toHaveLength(1);
+    expect(trends[0]).toMatchObject({ kind: "weight", change: "−5 kg since Jun 2019" });
+    expect(
+      trends[0]?.points.map((p) => [p.display, p.date, p.sources.map((s) => s.passageId)]),
+    ).toEqual([
+      ["84 kg", "2019-06-28", ["D1-5"]],
+      ["79 kg", "2020-04-05", ["D2-3"]],
+    ]);
+    expect(passages["D1-5"]?.text).toBe("Gewicht: 84 kg");
+  });
+
+  it("keeps a missing need's next step and only the left-out topics a passage documents", async () => {
+    const app = await start(new MemoryStorage(), () => ({
+      ...screenArgs("Thrombo ASS 100mg oral 1 0 0 0"),
+      needs: [
+        {
+          title: "Kidney function",
+          status: "not_documented",
+          facts: [],
+          note: "No creatinine.",
+          action: "Check creatinine before surgery",
+        },
+      ],
+      leftOut: [
+        { topic: "Blood pressure drug", sources: [{ passage: "D1-10", quote: "Blopress 8mg" }] },
+        { topic: "Heart markers", sources: [{ passage: "D1-10", quote: "NT-proBNP 450 pg/ml" }] },
+      ],
+    }));
+
+    const { screen } = await postScreen(app);
+
+    expect(screen.needs[0]).toMatchObject({ action: "Check creatinine before surgery" });
+    expect(screen.leftOut?.map((l) => [l.topic, l.sources[0]?.passageId])).toEqual([
+      ["Blood pressure drug", "D1-10"],
+    ]);
+  });
+
+  it("lists the drugs to review before an operation, and none for a diabetes review", async () => {
+    const preop = await start(new MemoryStorage(), () =>
+      screenArgs("Thrombo ASS 100mg oral 1 0 0 0"),
+    );
+
+    const { checks } = await postScreen(preop);
+
+    // Candesartan is a sartan, not an ACE inhibitor; low-dose aspirin is on no sick-day list.
+    expect(checks.map((c) => c.kind)).toEqual(["surgery"]);
+    expect(checks[0]?.items.map((i) => [i.tag, i.value, i.sources[0]?.passageId])).toEqual([
+      ["Metformin", "Glucophage (metformin) 1000 mg oral 1-1-1", "D1-11"],
+      ["Sartan", "Blopress (candesartan) 8 mg oral 1-0-½", "D1-10"],
+    ]);
+
+    const review = await start(new MemoryStorage(), () => ({
+      ...screenArgs("Thrombo ASS 100mg oral 1 0 0 0"),
+      role: "General practitioner",
+      task: "Diabetes review",
+    }));
+    const later = await postScreen(review, "General practitioner, diabetes review in spring 2020");
+    expect(later.checks).toEqual([]);
+  });
+
+  it("before a CT lists the contrast allergy and metformin and asks for kidney function, though the screen left the allergy out", async () => {
+    const app = await start(new MemoryStorage(), () => ({
+      role: "Radiologist",
+      task: "CT angiography of the neck",
+      needs: [
+        {
+          title: "Blood thinners",
+          status: "documented",
+          facts: [
+            {
+              label: "Antiplatelet",
+              value: "Aspirin (Thrombo ASS) 100 mg, 1-0-0",
+              sources: [{ passage: "D1-9", quote: "Thrombo ASS 100mg oral 1 0 0 0" }],
+            },
+          ],
+        },
+      ],
+    }));
+
+    const { checks } = await postScreen(app, "Radiologist, CT angiography of the neck vessels");
+
+    // No fact on the screen says the allergy, so the check quotes the letter.
+    expect(checks.map((c) => c.kind)).toEqual(["contrast"]);
+    expect(checks[0]?.items.map((i) => [i.tag, i.value, i.sources[0]?.passageId])).toEqual([
+      ["Allergy", "KM-Allergie (Übelkeit, Erbrechen)", "D1-2"],
+      ["Metformin", "Glucophage (metformin) 1000 mg oral 1-1-1", "D1-11"],
+    ]);
+    expect(checks[0]?.gaps.map((g) => g.title)).toEqual(["Kidney function"]);
+  });
+
+  it("before an MRI asks which agent caused the reaction and leaves metformin out", async () => {
+    const app = await start(new MemoryStorage(), () => ({
+      ...screenArgs("Thrombo ASS 100mg oral 1 0 0 0"),
+      role: "Radiologist",
+      task: "Contrast MRI of the liver",
+    }));
+
+    const { checks } = await postScreen(app, "Radiologist, contrast-enhanced MRI of the liver");
+
+    // The allergy keeps the screen's wording; gadolinium is no reason to stop metformin.
+    expect(checks[0]?.items.map((i) => [i.tag, i.value])).toEqual([
+      ["Allergy", "Contrast media allergy (nausea, vomiting)"],
+    ]);
+    expect(checks[0]?.passages).toEqual(["D1-2"]);
+    expect(checks[0]?.gaps.map((g) => g.title)).toEqual([
+      "Kidney function",
+      "Agent of the earlier reaction",
+    ]);
+  });
+
   it("refuses an empty situation", async () => {
     const app = await start(new MemoryStorage(), () => screenArgs("Thrombo ASS 100mg"));
     const response = await app.inject({
@@ -196,5 +500,242 @@ describe("POST /api/screens", () => {
       payload: { situation: "" },
     });
     expect(response.statusCode).toBe(400);
+  });
+
+  it("lists what the screen leaves open, each gap once, with who can close it", async () => {
+    const app = await start(
+      new MemoryStorage(),
+      (): JsonObject => ({
+        role: "Radiologist",
+        task: "CT angiography of the neck",
+        needs: [
+          {
+            title: "Body measures",
+            status: "documented",
+            facts: [
+              {
+                label: "BMI",
+                value: "BMI 33.5",
+                sources: [{ passage: "D1-6", quote: "BMI: 33.5" }],
+              },
+            ],
+          },
+          {
+            title: "Diabetes",
+            status: "documented",
+            facts: [
+              {
+                label: "HbA1c",
+                value: "HbA1c 6.9 %",
+                sources: [{ passage: "D1-13", quote: "HbA1c: 6,9 %" }],
+              },
+            ],
+          },
+          {
+            title: "Kidneys",
+            status: "not_documented",
+            facts: [],
+            note: "Creatinine, eGFR",
+            action: "Order before CT",
+          },
+          {
+            title: "Prior imaging",
+            status: "not_documented",
+            facts: [],
+            note: "Earlier contrast CT",
+            action: "Ask about earlier CT scans",
+          },
+          {
+            title: "Duplex report",
+            status: "not_documented",
+            facts: [],
+            note: "Carotid duplex result",
+            action: "Request it from the vascular clinic",
+          },
+        ],
+      }),
+    );
+
+    const { clarify } = await postScreen(app, "Radiologist, CT angiography of the neck vessels");
+
+    // The contrast checklist's kidney gap stands for the screen's own "Kidneys" gap.
+    expect(clarify.map((c) => [c.trigger, c.topic, c.from])).toEqual([
+      ["gap", "Kidney function", "test"],
+      ["gap", "Prior imaging", "patient"],
+      ["gap", "Duplex report", "records"],
+      ["contradiction", "BMI", "records"],
+      ["old", "HbA1c", "test"],
+    ]);
+    const conflict = clarify[3];
+    expect(conflict?.contradictionId).toBe("r-bmi-D1");
+    expect(conflict?.sources.map((s) => s.passageId).sort()).toEqual(["D1-4", "D1-5", "D1-6"]);
+    // The only HbA1c is from 28 June 2019, more than six months before the latest document.
+    const old = clarify[4];
+    expect(old?.reason).toContain("6.9 %");
+    expect(old?.reason).toContain("Jun 2019");
+    expect(old?.sources.map((s) => s.passageId)).toEqual(["D1-13"]);
+  });
+
+  it("shows her latest body measures, allergy and the diagnoses most documents name", async () => {
+    const app = await start(
+      new MemoryStorage(),
+      () => screenArgs("Thrombo ASS 100mg oral 1 0 0 0"),
+      "index",
+    );
+
+    const { basics } = await postScreen(app);
+
+    // Height and weight from April 2020; the only BMI is from 2019 and contradicts its letter.
+    expect(basics.measures.map((f) => [f.label, f.value, f.sources[0]?.passageId])).toEqual([
+      ["Height", "166 cm", "D2-2"],
+      ["Weight", "79 kg", "D2-3"],
+      ["BMI", "33.5 kg/m²", "D1-6"],
+    ]);
+    expect(basics.measures[2]?.light).toBe("yellow");
+    expect(basics.allergies.map((f) => [f.label, f.sources[0]?.passageId])).toEqual([
+      ["Contrast media", "D1-2"],
+    ]);
+    // T2DM is in both letters, hypertension in one; the ruled-out pneumonia is no problem.
+    expect(basics.problems.map((f) => [f.label, f.sources[0]?.passageId])).toEqual([
+      ["T2DM", "D2-6"],
+      ["HTN", "D1-16"],
+    ]);
+  });
+});
+
+describe("POST /api/answers", () => {
+  const SITUATION_GP = "General practitioner, diabetes review in spring 2020";
+
+  async function ask(app: FastifyInstance, question: string) {
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/answers",
+      payload: { situation: SITUATION_GP, question },
+    });
+    expect(response.statusCode).toBe(200);
+    return response.json<Answer>();
+  }
+
+  it("answers a follow-up question from the passage that says it, and again from the store", async () => {
+    // The first answer quotes a value the passage does not contain; the tool rejects it.
+    const app = await start(
+      new MemoryStorage(),
+      () => screenArgs("Thrombo ASS 100mg"),
+      "context",
+      (attempt) => ({
+        topic: "HbA1c",
+        facts: [
+          {
+            label: "HbA1c",
+            value: "HbA1c 6.9 %",
+            date: "2019-06-28",
+            sources: [{ passage: "D1-13", quote: attempt === 1 ? "HbA1c: 7,1 %" : "HbA1c: 6,9 %" }],
+          },
+        ],
+      }),
+    );
+
+    const answer = await ask(app, "What is her latest HbA1c?");
+
+    expect(answer).toMatchObject({ topic: "HbA1c", rejected: 0, cached: false });
+    expect(answer.missing).toBeUndefined();
+    expect(answer.facts[0]?.sources).toEqual([
+      {
+        passageId: "D1-13",
+        documentId: "D1",
+        documentTitle: "Stat. Patientenbrief",
+        documentDate: "2019-06-28",
+        quote: "HbA1c: 6,9 %",
+      },
+    ]);
+    // Nine months before the latest document, so the screen marks it old.
+    expect(answer.facts[0]?.light).toBe("yellow");
+    expect(answer.passages["D1-13"]?.text).toBe("HbA1c: 6,9 %");
+
+    const again = await ask(app, "  what is her latest   HbA1c? ");
+    expect(again.cached).toBe(true);
+    expect(again.facts).toEqual(answer.facts);
+  });
+
+  it("says what no document answers rather than writing it as a fact", async () => {
+    // The first answer states the gap as a fact; the tool sends it back.
+    const app = await start(
+      new MemoryStorage(),
+      () => screenArgs("Thrombo ASS 100mg"),
+      "context",
+      (attempt): JsonObject =>
+        attempt === 1
+          ? {
+              topic: "Carotid duplex",
+              facts: [
+                {
+                  label: "Duplex",
+                  value: "Not documented",
+                  sources: [{ passage: "D1-9", quote: "Thrombo ASS 100mg" }],
+                },
+              ],
+            }
+          : {
+              topic: "Carotid duplex",
+              facts: [],
+              missing: { note: "No carotid duplex", action: "Request the duplex report" },
+            },
+    );
+
+    const answer = await ask(app, "Was the carotid duplex repeated?");
+
+    expect(answer.facts).toEqual([]);
+    expect(answer.missing).toEqual({
+      note: "No carotid duplex",
+      action: "Request the duplex report",
+    });
+  });
+});
+
+describe("/api/notes", () => {
+  it("keeps what a clinician recorded across a restart until it is removed", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "track1-notes-"));
+    try {
+      const path = join(directory, "agent.sqlite");
+      const first = await start(await openNodeSqliteStorage(path), () => screenArgs("x"));
+      const created = await first.inject({
+        method: "POST",
+        url: "/api/notes",
+        payload: {
+          topic: "Prior imaging",
+          text: "CT with contrast in 2014, nausea afterwards",
+          source: "patient",
+          clarifies: "gap-prior-imaging",
+        },
+      });
+      expect(created.statusCode).toBe(201);
+      const note = created.json<Note>();
+      expect(note).toMatchObject({
+        topic: "Prior imaging",
+        text: "CT with contrast in 2014, nausea afterwards",
+        source: "patient",
+        clarifies: "gap-prior-imaging",
+      });
+      expect(Date.parse(note.recordedAt)).not.toBeNaN();
+      const empty = await first.inject({
+        method: "POST",
+        url: "/api/notes",
+        payload: { topic: "Prior imaging", text: "   ", source: "patient" },
+      });
+      expect(empty.statusCode).toBe(400);
+      const { app, runtime } = open.splice(0)[0] as (typeof open)[number];
+      await app.close();
+      await runtime.close();
+
+      const second = await start(await openNodeSqliteStorage(path), () => screenArgs("x"));
+      expect((await second.inject("/api/notes")).json<Note[]>()).toEqual([note]);
+
+      const url = `/api/notes/${note.id}`;
+      expect((await second.inject({ method: "DELETE", url })).statusCode).toBe(204);
+      expect((await second.inject("/api/notes")).json<Note[]>()).toEqual([]);
+      expect((await second.inject({ method: "DELETE", url })).statusCode).toBe(404);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 });

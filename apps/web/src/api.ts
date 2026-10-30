@@ -1,6 +1,8 @@
 import type {
+  Answer,
   AuthStatus,
   ErrorResponse,
+  Note,
   PatientDocument,
   PatientSummary,
   ScreenResponse,
@@ -26,8 +28,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return body as T;
 }
 
-const post = <T>(path: string, body: object = {}) =>
-  request<T>(path, { method: "POST", body: JSON.stringify(body) });
+const post = <T>(path: string, body: object = {}, signal?: AbortSignal) =>
+  request<T>(path, { method: "POST", body: JSON.stringify(body), signal });
 
 export const api = {
   auth: () => request<AuthStatus>("/api/auth"),
@@ -37,5 +39,13 @@ export const api = {
   logout: () => post<AuthStatus>("/api/auth/logout"),
   patient: () => request<PatientSummary>("/api/patient"),
   document: (id: string) => request<PatientDocument>(`/api/documents/${encodeURIComponent(id)}`),
-  screen: (situation: string) => post<ScreenResponse>("/api/screens", { situation }),
+  screen: (situation: string, signal?: AbortSignal) =>
+    post<ScreenResponse>("/api/screens", { situation }, signal),
+  answer: (situation: string, question: string) =>
+    post<Answer>("/api/answers", { situation, question }),
+  notes: () => request<Note[]>("/api/notes"),
+  addNote: (note: Pick<Note, "topic" | "text" | "source" | "clarifies">) =>
+    post<Note>("/api/notes", note),
+  removeNote: (id: string) =>
+    request<unknown>(`/api/notes/${encodeURIComponent(id)}`, { method: "DELETE" }),
 };

@@ -2,9 +2,9 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import "./index.css";
+import { applyTheme, readStored, THEME_KEY, type ThemePreference } from "./prefs";
 
-if (window.matchMedia("(prefers-color-scheme: dark)").matches)
-  document.documentElement.classList.add("dark");
+applyTheme(readStored<ThemePreference>(THEME_KEY, "light"));
 
 const root = document.getElementById("root");
 if (root)

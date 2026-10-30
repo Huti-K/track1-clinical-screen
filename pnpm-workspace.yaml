@@ -10,3 +10,7 @@ allowBuilds:
   esbuild: true
   "@google/genai": false
   protobufjs: false
+
+# GPT-6.1 Terra shipped after pi-ai 1.4.0's catalog; drop when its catalog carries it.
+patchedDependencies:
+  "@earendil-works/pi-ai@1.4.0": patches/@earendil-works__pi-ai@1.4.0.patch

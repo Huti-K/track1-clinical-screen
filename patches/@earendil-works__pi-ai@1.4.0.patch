@@ -1,0 +1,25 @@
+diff --git a/dist/providers/openai-codex.models.js b/dist/providers/openai-codex.models.js
+index 9a584e73fefc749226d29f78000564b41cf214bb..9783f1a62fcad6013db90f2f22070ac0620c9156 100644
+--- a/dist/providers/openai-codex.models.js
++++ b/dist/providers/openai-codex.models.js
+@@ -2,6 +2,20 @@
+ // Do not edit manually - run 'npm run generate-models' to update
+ import values from "./data/openai-codex.json" with { type: "json" };
+ import { flattenChatModelCatalog, flattenClassifierModelCatalog, flattenImageModelCatalog } from "../model-catalog.js";
++// GPT-6.1 Terra shipped after this catalog; added here until pi-ai carries it.
++const terraGroup = values["openai-codex-responses"];
++terraGroup["chat:gpt-6.1-terra"] = {
++    ...terraGroup["chat:gpt-6.1-sol"],
++    id: "gpt-6.1-terra",
++    name: "GPT-6.1 Terra",
++    cost: {
++        input: 1,
++        output: 5,
++        cacheRead: 0.05,
++        cacheWrite: 1.25,
++        tiers: [{ inputTokensAbove: 272000, input: 2, output: 7.5, cacheRead: 0.1, cacheWrite: 2.5 }],
++    },
++};
+ export const OPENAI_CODEX_MODELS = flattenChatModelCatalog("openai-codex", values);
+ export const OPENAI_CODEX_IMAGE_MODELS = flattenImageModelCatalog("openai-codex", values);
+ export const OPENAI_CODEX_CLASSIFIER_MODELS = flattenClassifierModelCatalog("openai-codex", values);

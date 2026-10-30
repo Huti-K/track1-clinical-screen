@@ -7,12 +7,8 @@ const { runtime, login } = await openConfigured((message, error) =>
 );
 const app = await buildApp(runtime, { login, webDist: config.webDist, logger: true });
 
-// Found once per store, in the background, so the first screen rarely waits for it.
 if (await login.signedIn())
-  runtime.contradictions().then(
-    (found) => app.log.info(`contradiction scan: ${found.length} found`),
-    (error: unknown) => app.log.error({ err: error }, "contradiction scan failed"),
-  );
+  runtime.prepare((message, error) => app.log.error({ err: error }, message));
 
 for (const signal of ["SIGINT", "SIGTERM"] as const)
   process.once(signal, async () => {

@@ -1,17 +1,17 @@
 import type { AssessedFact, AssessedNeed, Contradiction, Light, Need } from "@track1/shared";
 
 /** A value last documented longer ago than this before the latest document is worth a second look. */
-const STALE_AFTER_MONTHS = 6;
+export const STALE_AFTER_MONTHS = 6;
 
 const RANK: Record<Light, number> = { green: 0, yellow: 1, red: 2 };
 
-function monthsBetween(from: string, to: string): number {
+export function monthsBetween(from: string, to: string): number {
   const [fy, fm, fd] = from.split("-").map(Number) as [number, number, number];
   const [ty, tm, td] = to.split("-").map(Number) as [number, number, number];
   return (ty - fy) * 12 + (tm - fm) - (td < fd ? 1 : 0);
 }
 
-function monthName(iso: string): string {
+export function monthName(iso: string): string {
   return new Date(`${iso}T00:00:00Z`).toLocaleDateString("en-GB", {
     month: "short",
     year: "numeric",
