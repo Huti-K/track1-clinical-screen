@@ -3,6 +3,7 @@ import type {
   AuthStatus,
   ErrorResponse,
   Note,
+  OverviewResponse,
   PatientDocument,
   PatientSummary,
   ScreenResponse,
@@ -45,6 +46,7 @@ export const api = {
   patients: () => request<PatientSummary[]>("/api/patients"),
   document: (patientId: string, id: string) =>
     request<PatientDocument>(of(patientId, `/documents/${encodeURIComponent(id)}`)),
+  overview: (patientId: string) => request<OverviewResponse>(of(patientId, "/overview")),
   screen: (patientId: string, situation: string, signal?: AbortSignal) =>
     post<ScreenResponse>(of(patientId, "/screens"), { situation }, signal),
   answer: (patientId: string, situation: string, question: string) =>

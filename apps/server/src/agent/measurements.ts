@@ -1,12 +1,14 @@
 import type { PatientRecord } from "@track1/patient-record";
 import type { Contradiction, Fact, Passage, Source, Trend, TrendPoint } from "@track1/shared";
 
-export type Kind = "height" | "weight" | "bmi" | "hba1c" | "lvef" | "bp";
+export type Kind = "height" | "weight" | "bmi" | "hba1c" | "lvef" | "bp" | "hr";
 
 /** One value a passage states, with the words that state it. */
 export type Measurement = {
   kind: Kind;
   value: number;
+  /** The diastolic of a blood pressure. */
+  secondary?: number;
   display: string;
   date: string;
   source: Source;
@@ -23,7 +25,12 @@ const PATTERNS: { kind: Kind; pattern: RegExp; unit: string }[] = [
     pattern: /\b(?:RR|Blutdruck)(?:\s+bei\s+Aufnahme)?:\s*(\d{2,3})\/(\d{2,3})\s*mmHg/,
     unit: "mmHg",
   },
+  { kind: "hr", pattern: /\bHF:?\s*(\d{2,3})\s*\/min/, unit: "/min" },
 ];
+
+/** Every blood pressure a sentence about blood pressure gives, such as a crisis or a 24-hour mean. */
+const PRESSURE = /(\d{2,3})\/(\d{2,3})\s*mmHg/g;
+const ABOUT_PRESSURE = /\bRR\b|blutdruck|mittelwert/i;
 
 const TRENDS: { kind: Kind; label: string; mentions: RegExp }[] = [
   { kind: "weight", label: "Weight", mentions: /\bweight\b|gewicht/i },
@@ -41,6 +48,10 @@ function number(text: string): number {
   return Number(text.replace(",", "."));
 }
 
+/** `66 kg`, but `85/min`. */
+const withUnit = (value: string | number, unit: string) =>
+  unit.startsWith("/") ? `${value}${unit}` : `${value} ${unit}`;
+
 export function sourceOf(record: PatientRecord, passage: Passage, quote: string): Source {
   const document = record.document(passage.documentId);
   return {
@@ -52,7 +63,7 @@ export function sourceOf(record: PatientRecord, passage: Passage, quote: string)
   };
 }
 
-/** Every height, weight, BMI, HbA1c, ejection fraction and blood pressure the passages state. */
+/** Every height, weight, BMI, HbA1c, ejection fraction, blood pressure and heart rate the passages state. */
 export function measurements(record: PatientRecord): Measurement[] {
   return record.documents.flatMap((doc) =>
     doc.passages.flatMap((passage) =>
@@ -63,11 +74,39 @@ export function measurements(record: PatientRecord): Measurement[] {
         const display =
           kind === "bp"
             ? `${match[1]}/${match[2]} ${unit}`
-            : `${match[1].replace(",", ".")} ${unit}`;
+            : withUnit(match[1].replace(",", "."), unit);
         return [
-          { kind, value, display, date: doc.date, source: sourceOf(record, passage, match[0]) },
+          {
+            kind,
+            value,
+            ...(kind === "bp" && match[2] ? { secondary: number(match[2]) } : {}),
+            display,
+            date: doc.date,
+            source: sourceOf(record, passage, match[0]),
+          },
         ];
       }),
+    ),
+  );
+}
+
+/**
+ * Every blood pressure the passages give, not only the labelled admission value `measurements`
+ * reads: a crisis, a 24-hour mean, a morning peak. Several in one passage are several values.
+ */
+export function bloodPressures(record: PatientRecord): Measurement[] {
+  return record.documents.flatMap((doc) =>
+    doc.passages.flatMap((passage) =>
+      ABOUT_PRESSURE.test(passage.text)
+        ? [...passage.text.matchAll(PRESSURE)].map(([quote, systolic = "", diastolic = ""]) => ({
+            kind: "bp" as const,
+            value: number(systolic),
+            secondary: number(diastolic),
+            display: `${systolic}/${diastolic} mmHg`,
+            date: doc.date,
+            source: sourceOf(record, passage, quote),
+          }))
+        : [],
     ),
   );
 }
@@ -94,17 +133,40 @@ function daysBetween(from: string, to: string): number {
 }
 
 /** The same value restated within a month, as a letter repeating a consult, is one point. */
-function points(values: Measurement[]): TrendPoint[] {
+function points(values: readonly Measurement[]): TrendPoint[] {
   const sorted = [...values].sort((a, b) => a.date.localeCompare(b.date));
   const merged: TrendPoint[] = [];
   for (const m of sorted) {
-    const last = merged.at(-1);
-    if (last && last.value === m.value && daysBetween(last.date, m.date) <= 31) {
-      if (!last.sources.some((s) => s.passageId === m.source.passageId))
-        last.sources.push(m.source);
-    } else merged.push({ value: m.value, display: m.display, date: m.date, sources: [m.source] });
+    const same = merged.find((p) => p.display === m.display && daysBetween(p.date, m.date) <= 31);
+    if (same) {
+      if (!same.sources.some((s) => s.passageId === m.source.passageId))
+        same.sources.push(m.source);
+    } else
+      merged.push({
+        value: m.value,
+        ...(m.secondary !== undefined ? { secondary: m.secondary } : {}),
+        display: m.display,
+        date: m.date,
+        sources: [m.source],
+      });
   }
   return merged;
+}
+
+/** The values as a series, with the change from the first to the latest when there are two. */
+function trendOf(kind: Kind, label: string, values: readonly Measurement[]): Trend[] {
+  const series = points(values);
+  const first = series[0];
+  const last = series.at(-1);
+  if (!first || !last) return [];
+  const unit = PATTERNS.find((p) => p.kind === kind)?.unit ?? "";
+  const delta = Math.round((last.value - first.value) * 10) / 10;
+  const sign = delta > 0 ? "+" : delta < 0 ? "−" : "±";
+  const change =
+    series.length > 1
+      ? `${sign}${withUnit(Math.abs(delta), unit)} since ${monthYear(first.date)}`
+      : "";
+  return [{ kind, label, unit, points: series, change }];
 }
 
 /**
@@ -117,23 +179,27 @@ export function trendsFor(all: readonly Measurement[], facts: readonly Fact[]): 
   return TRENDS.flatMap(({ kind, label, mentions }) => {
     const values = all.filter((m) => m.kind === kind);
     if (!values.some((m) => cited.has(m.source.passageId)) && !mentions.test(text)) return [];
-    const series = points(values);
-    const first = series[0];
-    const last = series.at(-1);
-    if (!first || !last || series.length < 2) return [];
-    const unit = PATTERNS.find((p) => p.kind === kind)?.unit ?? "";
-    const delta = Math.round((last.value - first.value) * 10) / 10;
-    const sign = delta > 0 ? "+" : delta < 0 ? "−" : "±";
-    return [
-      {
-        kind,
-        label,
-        unit,
-        points: series,
-        change: `${sign}${Math.abs(delta)} ${unit} since ${monthYear(first.date)}`,
-      },
-    ];
+    return trendOf(kind, label, values).filter((trend) => trend.points.length > 1);
   });
+}
+
+const OVERVIEW: { kind: Kind; label: string }[] = [
+  { kind: "weight", label: "Weight" },
+  { kind: "bp", label: "Blood pressure" },
+  { kind: "bmi", label: "BMI" },
+  { kind: "hr", label: "Heart rate" },
+  { kind: "hba1c", label: "HbA1c" },
+  { kind: "lvef", label: "LV ejection fraction" },
+];
+
+/** Every measurement the record states, for the start page; blood pressure from `bloodPressures`. */
+export function overviewTrends(
+  all: readonly Measurement[],
+  pressures: readonly Measurement[],
+): Trend[] {
+  return OVERVIEW.flatMap(({ kind, label }) =>
+    trendOf(kind, label, kind === "bp" ? pressures : all.filter((m) => m.kind === kind)),
+  );
 }
 
 /** A stated BMI more than this far from weight / height² in the same document contradicts them. */

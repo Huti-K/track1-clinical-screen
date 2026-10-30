@@ -110,6 +110,10 @@ export async function buildApp(
     async (request) => runtimeOf(request.params).ask(request.body.situation, request.body.question),
   );
 
+  app.get<{ Params: PatientParams }>("/api/patients/:patientId/overview", async (request) =>
+    runtimeOf(request.params).overview(),
+  );
+
   app.get<{ Params: PatientParams }>("/api/patients/:patientId/contradictions", async (request) =>
     runtimeOf(request.params).contradictions(),
   );

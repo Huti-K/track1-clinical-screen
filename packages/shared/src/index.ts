@@ -113,9 +113,16 @@ export type Contradiction = {
 };
 
 /** One documented value of a measurement, with the passage that states it. */
-export type TrendPoint = { value: number; display: string; date: string; sources: Source[] };
+export type TrendPoint = {
+  value: number;
+  /** The second number of a pair, such as the diastolic of a blood pressure. */
+  secondary?: number;
+  display: string;
+  date: string;
+  sources: Source[];
+};
 
-/** A measurement documented at least twice, such as weight, for a sparkline. */
+/** A measurement over time, such as weight; screens carry only those documented at least twice. */
 export type Trend = {
   kind: string;
   label: string;
@@ -230,6 +237,14 @@ export type ScreenResponse = {
   /** Full text and section of every passage the screen cites, for previews. */
   passages: Record<string, { text: string; section: string }>;
   cached: boolean;
+};
+
+/** The start page's overview of a patient, from the documents alone: no screen is built for it. */
+export type OverviewResponse = {
+  /** Every measurement the documents state, oldest point first; one point when stated once. */
+  vitals: Trend[];
+  basics: Basics;
+  contradictions: Contradiction[];
 };
 
 /** A follow-up question about the record, answered under the screen's rules: cited facts or a gap. */

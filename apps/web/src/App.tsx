@@ -15,6 +15,7 @@ import { Button, ErrorText, Spinner } from "./components/ui";
 import { DocumentPanel, type DocumentTarget } from "./DocumentPanel";
 import { SHORTCUTS, useHotkey, useKeydown } from "./hotkeys";
 import { LoginPage } from "./LoginPage";
+import { PatientOverview } from "./PatientOverview";
 import { PatientContext } from "./patient";
 import {
   PATIENT_KEY,
@@ -439,6 +440,9 @@ function Workspace({ auth, onAuth }: { auth: AuthStatus; onAuth: (auth: AuthStat
                       <div className="mt-10">
                         <ScreenSkeleton documents={patient?.documents.length ?? 8} />
                       </div>
+                    )}
+                    {!busy && patient && (
+                      <PatientOverview patient={patient} onOpenLetter={setLetter} />
                     )}
                   </>
                 )}

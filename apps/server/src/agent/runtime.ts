@@ -20,6 +20,7 @@ import type {
   Fact,
   Need,
   Note,
+  OverviewResponse,
   ScreenResponse,
   Source,
 } from "@track1/shared";
@@ -49,9 +50,11 @@ import {
   reviewExtension,
 } from "./factIndex.js";
 import {
+  bloodPressures,
   type Measurement,
   measurements,
   mergeContradictions,
+  overviewTrends,
   ruleContradictions,
   trendsFor,
 } from "./measurements.js";
@@ -159,6 +162,7 @@ export class ClinicalRuntime {
   #scan: Promise<Contradiction[]> | undefined;
   #index: Promise<IndexedFact[]> | undefined;
   readonly #measurements: Measurement[];
+  readonly #pressures: Measurement[];
   readonly #rules: Contradiction[];
 
   private constructor(
@@ -174,6 +178,7 @@ export class ClinicalRuntime {
     },
   ) {
     this.#measurements = measurements(record);
+    this.#pressures = bloodPressures(record);
     this.#rules = ruleContradictions(record);
   }
 
@@ -482,6 +487,23 @@ export class ClinicalRuntime {
       model: this.modelName,
       elapsedMs: request?.elapsedMs || Date.now() - startedAt,
       cached,
+    };
+  }
+
+  /**
+   * The start page's overview: the measurements, the basics every screen shows and the
+   * contradictions. It builds no screen; it waits only for the once-per-store index and scan.
+   */
+  async overview(): Promise<OverviewResponse> {
+    const index = this.options.retrieval === "index" ? await this.factIndex().catch(() => []) : [];
+    const contradictions = await this.contradictions().catch((error: unknown) => {
+      this.options.log?.("contradiction scan failed", error);
+      return this.#rules;
+    });
+    return {
+      vitals: overviewTrends(this.#measurements, this.#pressures),
+      basics: basics(this.record, this.#measurements, index, contradictions),
+      contradictions,
     };
   }
 

@@ -13,7 +13,7 @@ import {
 import { MemoryStorage, type Storage } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { loadPatientRecord } from "@track1/patient-record";
-import type { Answer, Note, ScreenResponse } from "@track1/shared";
+import type { Answer, Note, OverviewResponse, ScreenResponse } from "@track1/shared";
 import type { FastifyInstance } from "fastify";
 import { afterEach, describe, expect, it } from "vitest";
 import { ClinicalRuntime } from "../src/agent/runtime.js";
@@ -649,6 +649,35 @@ describe("POST /api/patients/:patientId/screens", () => {
     expect([diagnosis?.label, diagnosis?.light]).toEqual(["T2DM", "green"]);
     expect([drug?.label, drug?.light]).toEqual(["Aspirin (Thrombo ASS)", "yellow"]);
     expect(drug?.reason).toMatch(/9 months before/);
+  });
+});
+
+describe("GET /api/patients/:patientId/overview", () => {
+  it("charts what the documents state, each value linked to its passage, without building a screen", async () => {
+    let screens = 0;
+    const app = await start(new MemoryStorage(), () => {
+      screens++;
+      return screenArgs("Thrombo ASS 100mg oral 1 0 0 0");
+    });
+    const response = await app.inject({ method: "GET", url: `${PATIENT}/overview` });
+    expect(response.statusCode).toBe(200);
+    const { vitals, basics, contradictions } = response.json<OverviewResponse>();
+
+    const weight = vitals.find((t) => t.kind === "weight");
+    expect(weight?.points.map((p) => [p.display, p.sources[0]?.quote])).toEqual([
+      ["84 kg", "Gewicht: 84 kg"],
+      ["79 kg", "Gewicht: 79 kg"],
+    ]);
+    expect(weight?.change).toBe("−5 kg since Jun 2019");
+    // Stated once: one point and no change, where a screen's trends would leave it out.
+    const pressure = vitals.find((t) => t.kind === "bp");
+    expect(pressure?.points.map((p) => [p.value, p.secondary, p.sources[0]?.quote])).toEqual([
+      [138, 84, "138/84 mmHg"],
+    ]);
+    expect(pressure?.change).toBe("");
+    expect(basics.measures.map((f) => f.label)).toEqual(["Height", "Weight", "BMI"]);
+    expect(contradictions.length).toBeGreaterThan(0);
+    expect(screens).toBe(0);
   });
 });
 

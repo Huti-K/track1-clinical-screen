@@ -1,6 +1,11 @@
 import { type PatientRecord, splitPassages } from "@track1/patient-record";
 import { describe, expect, it } from "vitest";
-import { ruleContradictions } from "../src/agent/measurements.js";
+import {
+  bloodPressures,
+  measurements,
+  overviewTrends,
+  ruleContradictions,
+} from "../src/agent/measurements.js";
 
 /** A record of one-line documents, each `[id, date, text]`, with `<BR>` between passages. */
 function record(...docs: [string, string, string][]): PatientRecord {
@@ -30,6 +35,49 @@ function record(...docs: [string, string, string][]): PatientRecord {
 }
 
 const sides = (r: PatientRecord) => ruleContradictions(r).filter((c) => c.id.startsWith("r-side"));
+
+describe("overview measurements", () => {
+  const r = record(
+    [
+      "A",
+      "2020-03-02",
+      "Mittelwert über 24 Stunden: 131/82 mmHg<BR>Tagesmittelwert: 147/90 mmHg<BR>Sinusrhythmus mit HF von 55 - 99 (73)/min;",
+    ],
+    [
+      "B",
+      "2020-03-20",
+      "Wegen Blutdruckwerten von 192/104 mmHg erfolgte die Aufnahme.<BR>RR bei Aufnahme: 150/96 mmHg<BR>HF 78/min, Linkstyp<BR>Mitralklappe: unauffällig (DG max.:4mmHg).<BR>Abendliche RR-Spitzen bis 131/82 mmHg.",
+    ],
+    ["C", "2021-01-11", "RR: 136/82 mmHg<BR>HF: 64/min"],
+  );
+
+  it("reads every blood pressure a sentence about blood pressure gives, with its diastolic", () => {
+    expect(bloodPressures(r).map((m) => [m.display, m.secondary, m.source.quote])).toEqual([
+      ["131/82 mmHg", 82, "131/82 mmHg"],
+      ["147/90 mmHg", 90, "147/90 mmHg"],
+      ["192/104 mmHg", 104, "192/104 mmHg"],
+      ["150/96 mmHg", 96, "150/96 mmHg"],
+      ["131/82 mmHg", 82, "131/82 mmHg"],
+      ["136/82 mmHg", 82, "136/82 mmHg"],
+    ]);
+  });
+
+  it("merges a value a later letter restates, keeps two with the same systolic apart, and reads a single heart rate, not a range", () => {
+    const vitals = overviewTrends(measurements(r), bloodPressures(r));
+    const pressure = vitals.find((t) => t.kind === "bp");
+    expect(pressure?.points.map((p) => [p.display, p.sources.map((s) => s.documentId)])).toEqual([
+      ["131/82 mmHg", ["A", "B"]],
+      ["147/90 mmHg", ["A"]],
+      ["192/104 mmHg", ["B"]],
+      ["150/96 mmHg", ["B"]],
+      ["136/82 mmHg", ["C"]],
+    ]);
+    expect(vitals.find((t) => t.kind === "hr")?.points.map((p) => p.display)).toEqual([
+      "78/min",
+      "64/min",
+    ]);
+  });
+});
 
 describe("carotid side check", () => {
   it("reads the artery's side, not the eye's, and raises no alarm when all agree", () => {
