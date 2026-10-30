@@ -64,18 +64,16 @@ The model is reached through the user's ChatGPT sign-in (OpenAI Responses API) o
 
 ## Metric results
 
-Measured with `pnpm eval --set all` on 30 October 2026, on a fresh store with the default settings above. The eval types each situation's title and description into the app and grades the screen against `cases/expected.json` with regular expressions over the fact text, so a "MISS" can still be a correct answer worded differently.
+Measured with `pnpm eval --set all` on 30 October 2026, on a fresh store with the default settings above; the contradictions come from the run before, with the same scan. The eval types each situation's title and description into the app and grades the screen against `cases/expected.json` with regular expressions over the fact text, so a "MISS" can still be a correct answer worded differently.
 
 | Metric                         | Result                                                                                                                     | Target     |
 | ------------------------------ | -------------------------------------------------------------------------------------------------------------------------- | ---------- |
-| Correct answers (5 situations) | 13 of 15                                                                                                                   | 15 of 15   |
+| Correct answers (5 situations) | 15 of 15                                                                                                                   | 15 of 15   |
 | Traceability                   | Every fact on screen quotes its linked passage word for word (checked in code; facts that fail are dropped)                | 100%       |
 | Invented facts                 | Not counted by hand yet; every fact must quote its passage, and the index review drops values the passage does not support | 0          |
 | Contradictions                 | 7 real, 0 false alarms                                                                                                     | 5 or more  |
-| Load time, slowest of the 5    | 4.9 s                                                                                                                      | under 10 s |
+| Load time, slowest of the 5    | 8.7 s                                                                                                                      | under 10 s |
 
 What does not work yet:
-- **2.3, the date of the planned operation.** The screen shows the operation with its date in the date column, but that column shows month and year only, not the day.
-- **3.3, the weight change.** The screen shows the latest weight and the total loss, but not every earlier weight the loss was computed from.
-- **The first screen right after the first start** reads the whole record while the fact index is being built (about 20 s per patient) and takes 9–16 s. Every screen after that takes 4–5 s, and a repeated situation is served from the store.
-- Across runs the model picks slightly different facts: an earlier run with high reasoning for the index scored 14 of 15, and six of the seven benchmark runs before the parallel index scored 33 of 33 on the five situations and six held-out ones.
+- **The first screen right after the first start** reads the whole record while the fact index is being built (about 20 s per patient) and takes 9–16 s. Every screen after that takes 4–9 s, and a repeated situation is served from the store.
+- Across runs the model picks slightly different facts for the same situation, so a run can miss an answer another run shows: in this run it missed one of the 15 held-out answers it graded, and one held-out screen once took 78 s when a model call was retried.
