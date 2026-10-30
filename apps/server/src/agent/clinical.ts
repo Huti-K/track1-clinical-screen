@@ -208,7 +208,8 @@ const ScreenArgs = Type.Object({
   task: Type.String({ description: "The task in English, at most 8 words." }),
   occasion: Type.Optional(
     Type.String({
-      description: "What the task is for, at most 8 words, such as 'Hip replacement, 12 March 2021'.",
+      description:
+        "What the task is for, at most 8 words, such as 'Hip replacement, 12 March 2021'.",
     }),
   ),
   needs: Type.Array(

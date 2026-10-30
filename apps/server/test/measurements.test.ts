@@ -83,7 +83,11 @@ describe("carotid side check", () => {
   it("reads the artery's side, not the eye's, and raises no alarm when all agree", () => {
     const r = record(
       ["A", "2019-10-07", "Mittelgradige 70%ige Abgangsstenose der Arteria carotis interna links."],
-      ["B", "2019-10-09", "Diagnose: TIA mit Sehstörung li. Auge bei 70% Stenose der A. Carotis sin."],
+      [
+        "B",
+        "2019-10-09",
+        "Diagnose: TIA mit Sehstörung li. Auge bei 70% Stenose der A. Carotis sin.",
+      ],
       [
         "C",
         "2019-10-09",

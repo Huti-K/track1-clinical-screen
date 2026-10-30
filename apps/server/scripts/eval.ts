@@ -1,13 +1,14 @@
 /**
  * Runs the situations in cases/situations.md on a fresh store and writes each screen as Markdown
- * beside the expected answers, with an approximate grade (scripts/rubric.ts), times and tokens.
+ * beside the expected answers, with an approximate grade (cases/rubric.ts), times and tokens. The
+ * cases stay out of the repository, so this runs only where they are.
  *
  *   pnpm eval                                  the configured model (.env), into output/eval
  *   pnpm eval --only 2,4                       only situations 2 and 4
  *   pnpm eval --run openai-codex/gpt-6-luna@low/high:context [--run ...]
  *                                              one benchmark run per spec, into output/bench
  *                                              (model@screenThinking/scanThinking:retrieval+backgroundModel)
- *   pnpm eval --set heldout|all                 the held-out situations (scripts/heldout.ts), or both
+ *   pnpm eval --set heldout|all                 the held-out situations (cases/rubric.ts), or both
  *   pnpm eval --run spec#a --run spec#b        the same spec twice, as separate runs
  *   pnpm eval --report                         one table of every run in output/bench
  */
@@ -21,12 +22,10 @@ import type { Contradiction, ScreenResponse, Source } from "@track1/shared";
 import type { Retrieval } from "../src/agent/clinical.js";
 import { config, parseModel } from "../src/config.js";
 import { openConfigured } from "../src/open.js";
-import { HELDOUT, HELDOUT_ANSWERS, HELDOUT_EXPECTED } from "./heldout.js";
-import { gradeAnswer, gradeContradictions, screenText } from "./rubric.js";
+import { gradeAnswer, gradeContradictions, loadRubric } from "./rubric.js";
 
 const root = resolve(import.meta.dirname, "../../..");
-/** The patient whose situations and expected answers are in cases/. */
-const PATIENT = "0000-0001";
+const rubric = await loadRubric(join(root, "cases/rubric.ts"));
 type Expected = { id: string; question: string; answer: string; sources: string[] };
 
 type RunSpec = {
@@ -66,11 +65,6 @@ function situations(): { number: number; title: string; text: string }[] {
     title: match[2]?.trim() ?? "",
     text: `${match[2]?.trim()}. ${match[3]?.replace(/\s+/g, " ").trim()}`,
   }));
-}
-
-function grade(id: string, screen: ScreenResponse["screen"]): boolean {
-  const held = HELDOUT_ANSWERS[id];
-  return held ? held.every((p) => p.test(screenText(screen))) : gradeAnswer(id, screen);
 }
 
 /** `provider/model@screen/scan:retrieval+backgroundModel#tag`, every part after the model optional. */
@@ -147,7 +141,7 @@ function render(
       ...check.gaps.map((gap) => `- **not documented: ${gap.title}** ${gap.note} ${gap.action}`),
       "",
     ]),
-    "## Expected answers (cases/expected.json), graded by scripts/rubric.ts",
+    "## Expected answers (cases/expected.json), graded by cases/rubric.ts",
     ...expected.map(
       (e) =>
         `- **${answers[e.id] ? "PASS" : "MISS"} ${e.id} ${e.question}** ${e.answer} (${e.sources.join(", ") || "-"})`,
@@ -169,9 +163,12 @@ async function run(
   const retrieval = spec.retrieval ?? config.retrieval;
   const expected = [
     ...(JSON.parse(readFileSync(join(root, "cases/expected.json"), "utf8")) as Expected[]),
-    ...HELDOUT_EXPECTED.map((e) => ({ ...e, sources: [] })),
+    ...rubric.heldoutExpected.map((e) => ({ ...e, sources: [] })),
   ];
-  const chosen = [...(set === "heldout" ? [] : situations()), ...(set === "known" ? [] : HELDOUT)];
+  const chosen = [
+    ...(set === "heldout" ? [] : situations()),
+    ...(set === "known" ? [] : rubric.heldout),
+  ];
   const { runtimes, login } = await openConfigured(
     (message, error) => console.warn(`[${spec.label}] ${message}`, error ?? ""),
     {
@@ -187,8 +184,9 @@ async function run(
     },
   );
   try {
-    const runtime = runtimes.find((r) => r.record.summary.id === PATIENT);
-    if (!runtime) throw new Error(`Patient ${PATIENT}, whose situations these are, is missing.`);
+    const runtime = runtimes.find((r) => r.record.summary.id === rubric.patient);
+    if (!runtime)
+      throw new Error(`Patient ${rubric.patient}, whose situations these are, is missing.`);
     if (!(await login.signedIn()))
       throw new Error(`Not signed in to ${runtime.modelName}. Sign in in the app or set a key.`);
     mkdirSync(outDir, { recursive: true });
@@ -197,7 +195,7 @@ async function run(
     const found = await runtime.contradictions();
     const scanMs = Date.now() - started;
     const afterScan = sum((await runtime.harness.usage(context)).models);
-    const graded = gradeContradictions(found);
+    const graded = gradeContradictions(rubric, found);
     console.log(`[${spec.label}] scan: ${found.length} in ${(scanMs / 1000).toFixed(1)} s`);
     let index: { ms: number; facts: number } | undefined;
     if (retrieval === "index") {
@@ -216,7 +214,9 @@ async function run(
       const response = await runtime.screen(situation.text);
       const ms = Date.now() - started;
       const mine = expected.filter((e) => e.id.startsWith(`${situation.number}.`));
-      const answers = Object.fromEntries(mine.map((e) => [e.id, grade(e.id, response.screen)]));
+      const answers = Object.fromEntries(
+        mine.map((e) => [e.id, gradeAnswer(rubric, e.id, response.screen)]),
+      );
       const slug = situation.title.toLowerCase().replace(/\W+/g, "-");
       writeFileSync(
         join(outDir, `${situation.number}-${slug}.md`),
@@ -281,7 +281,7 @@ function report(benchDir: string): string {
   return [
     "# Benchmark",
     "",
-    "Answers and known contradictions are graded by scripts/rubric.ts; read the misses and the other contradictions before trusting a number.",
+    "Answers and known contradictions are graded by cases/rubric.ts; read the misses and the other contradictions before trusting a number.",
     "",
     "| Run | Answers | Contradictions | Slowest screen | Median screen | Scan | Screen tokens in / cached / out |",
     "|---|---|---|---|---|---|---|",
