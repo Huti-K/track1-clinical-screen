@@ -1,8 +1,9 @@
 import type { PatientSummary } from "@track1/shared";
-import { ArrowRight, ChevronDown, UserRound } from "lucide-react";
+import { ArrowRight, ChevronDown, Mic, UserRound } from "lucide-react";
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { cx, Spinner } from "./components/ui";
 import { highlight } from "./DocumentPanel";
+import { useDictation } from "./dictation";
 import { PatientHeader, ROLES } from "./ScreenView";
 import { roleIcon } from "./Timeline";
 
@@ -77,6 +78,7 @@ export function ScenarioForm({
   const suggestions = open && !busy && (role || text.trim()) ? suggest(text, role) : [];
   const RoleIcon = role ? roleIcon(role) : UserRound;
   const examples = patient?.situations ?? [];
+  const dictation = useDictation((said) => update(role, said));
 
   useEffect(() => {
     // A phone keyboard would cover the page, so only a pointer device gets the cursor right away.
@@ -103,6 +105,7 @@ export function ScenarioForm({
 
   function build() {
     if (!text.trim() || busy) return;
+    dictation.cancel();
     setOpen(false);
     onSubmit();
   }
@@ -159,8 +162,12 @@ export function ScenarioForm({
             aria-autocomplete="list"
             aria-controls={suggestions.length > 0 ? listId : undefined}
             aria-activedescendant={suggestions[active] ? `${listId}-${active}` : undefined}
-            placeholder="What's happening? Or paste the whole situation"
+            placeholder={
+              dictation.listening ? "Listening…" : "What's happening? Or paste the whole situation"
+            }
             onChange={(e) => {
+              // Typing takes over from dictation, which would otherwise write over it.
+              dictation.cancel();
               update(role, e.target.value);
               setOpen(true);
             }}
@@ -184,6 +191,37 @@ export function ScenarioForm({
             }}
             className="max-h-[40vh] min-w-0 flex-1 resize-none bg-transparent py-2 text-[15px] leading-6 outline-none placeholder:text-muted-foreground focus-visible:shadow-none"
           />
+          {!busy && (
+            <button
+              type="button"
+              aria-pressed={dictation.listening}
+              aria-label={dictation.listening ? "Stop dictation" : "Dictate"}
+              title={dictation.listening ? "Stop dictation" : "Dictate"}
+              // The cursor stays in the field, so Enter still builds the screen.
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => {
+                if (dictation.listening) dictation.stop();
+                else {
+                  setOpen(false);
+                  dictation.start(text);
+                }
+              }}
+              className={cx(
+                "relative grid size-10 shrink-0 cursor-pointer place-items-center rounded-full transition-colors duration-150",
+                dictation.listening
+                  ? "bg-accent-wash text-accent-text"
+                  : "text-muted-foreground hover:bg-hover hover:text-foreground",
+              )}
+            >
+              {dictation.listening && (
+                <span
+                  className="absolute inset-0 rounded-full bg-accent-wash motion-safe:animate-ping"
+                  aria-hidden
+                />
+              )}
+              <Mic className="relative size-4" aria-hidden />
+            </button>
+          )}
           {/* Keys keep React from turning the clicked Cancel into a submit button mid-click. */}
           {busy ? (
             <button
@@ -251,6 +289,11 @@ export function ScenarioForm({
           </div>
         )}
       </form>
+      {dictation.error && (
+        <p role="alert" className="mt-2 text-center text-xs text-muted-foreground">
+          {dictation.error}
+        </p>
+      )}
       {!role && !text.trim() && examples.length > 0 && (
         <>
           <p className="mt-6 mb-2 text-center text-xs text-muted-foreground">Examples</p>
@@ -260,6 +303,7 @@ export function ScenarioForm({
                 key={example}
                 type="button"
                 onClick={() => {
+                  dictation.cancel();
                   onChange(example);
                   field.current?.focus();
                 }}

@@ -14,6 +14,7 @@ import { Brand } from "./components/BrandMark";
 import { Button, ErrorText, Spinner } from "./components/ui";
 import { DocumentPanel, type DocumentTarget } from "./DocumentPanel";
 import { SHORTCUTS, useHotkey, useKeydown } from "./hotkeys";
+import { useHoverLinks } from "./hoverLinks";
 import { LoginPage } from "./LoginPage";
 import { PatientOverview } from "./PatientOverview";
 import { PatientContext } from "./patient";
@@ -83,6 +84,7 @@ function Workspace({ auth, onAuth }: { auth: AuthStatus; onAuth: (auth: AuthStat
   const pending = useRef<AbortController>(undefined);
 
   const layout = useMemo(() => (result ? layoutScreen(result) : undefined), [result]);
+  useHoverLinks();
 
   const setLetter = useCallback((target: DocumentTarget | undefined) => {
     setComparing(undefined);
@@ -407,7 +409,7 @@ function Workspace({ auth, onAuth }: { auth: AuthStatus; onAuth: (auth: AuthStat
                     key={result.id}
                     result={result}
                     layout={layout}
-                    letterOpen={!!letter}
+                    besideOpen={!!letter || !!comparing}
                     onOpenLetter={setLetter}
                     onCompare={(c) => {
                       setLetterTarget(undefined);

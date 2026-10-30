@@ -191,4 +191,46 @@ describe("layoutScreen", () => {
         ?.lines.map((line) => [line.label, line.detail]),
     ).toEqual([["Anticoagulant", advice.Anticoagulant]]);
   });
+  it("charts each measurement over time and rings the point a contradiction cites", () => {
+    const point = (value: number, date: string, passageId: string) => ({
+      value,
+      display: `${value} kg/m²`,
+      date,
+      sources: [{ ...DISCHARGE, documentDate: date, passageId, quote: `BMI: ${value}` }],
+    });
+    const result = screen([]);
+    result.trends = [
+      {
+        kind: "bmi",
+        label: "BMI",
+        unit: "kg/m²",
+        points: [
+          point(31.2, "2019-11-04", "56780012-20"),
+          point(30, "2021-01-20", "56780016-14"),
+          point(27.5, "2021-02-03", "56780018-25"),
+        ],
+        change: "−3.7 kg/m² since Nov 2019",
+      },
+    ];
+    result.contradictions = [
+      {
+        id: "r-bmi-56780016",
+        method: "rule",
+        summary: "BMI 30 does not match 79 kg at 166 cm, which gives a BMI of 28.7.",
+        passages: [{ ...DISCHARGE, passageId: "56780016-14", quote: "BMI: 30" }],
+        relevant: true,
+      },
+    ];
+
+    const trend = layoutScreen(result)
+      .after.find((s) => s.title === "Over time")
+      ?.lines.find((line) => line.label === "BMI")?.trend;
+
+    expect(trend?.points.map((p) => [p.value, p.flagged])).toEqual([
+      [31.2, false],
+      [30, true],
+      [27.5, false],
+    ]);
+    expect(trend?.change).toBe("−3.7 kg/m²");
+  });
 });

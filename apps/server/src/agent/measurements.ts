@@ -267,15 +267,27 @@ function sideNear(clause: string, artery: Span, percent: Span) {
   const spans = [best.span, artery, percent];
   return {
     side: best.side,
+    term: clause.slice(best.span.from, best.span.to),
     quote: clause
       .slice(Math.min(...spans.map((s) => s.from)), Math.max(...spans.map((s) => s.to)))
       .trim(),
   };
 }
 
+const words = (text: string) => new Set(text.toLowerCase().match(/[\p{L}\d]+/gu));
+
+/** The share of `a`'s words that `b` also has: near 1 when one letter copied the other's sentence. */
+function overlap(a: string, b: string): number {
+  const of = words(a);
+  const other = words(b);
+  return of.size ? [...of].filter((w) => other.has(w)).length / of.size : 0;
+}
+
+type Sided = Source & { term: string };
+
 /** The same carotid stenosis, by its percentage, put on the left in one passage and on the right in another. */
 function carotidSideChecks(record: PatientRecord): Contradiction[] {
-  const bySide = new Map<string, Map<Side, Source[]>>();
+  const bySide = new Map<string, Map<Side, Sided[]>>();
   for (const doc of record.documents)
     for (const passage of doc.passages) {
       if (
@@ -293,11 +305,11 @@ function carotidSideChecks(record: PatientRecord): Contradiction[] {
           { from: percent.index, to: percent.index + percent[0].length },
         );
         if (!near) continue;
-        const sides = bySide.get(percent[1]) ?? new Map<Side, Source[]>();
+        const sides = bySide.get(percent[1]) ?? new Map<Side, Sided[]>();
         bySide.set(percent[1], sides);
         const list = sides.get(near.side) ?? [];
         if (!list.some((s) => s.passageId === passage.id))
-          list.push(sourceOf(record, passage, near.quote));
+          list.push({ ...sourceOf(record, passage, near.quote), term: near.term });
         sides.set(near.side, list);
       }
     }
@@ -306,19 +318,38 @@ function carotidSideChecks(record: PatientRecord): Contradiction[] {
     const right = sides.get("right") ?? [];
     if (!left.length || !right.length) return [];
     const [major, minor, majorSide, minorSide] =
-      left.length >= right.length ? [left, right, "left", "right"] : [right, left, "right", "left"];
-    const shown = [...new Map([...major].reverse().map((s) => [s.documentId, s])).values()]
+      left.length >= right.length
+        ? ([left, right, "left", "right"] as const)
+        : ([right, left, "right", "left"] as const);
+    // Shown first: the sentence the odd passage copied with the side changed, then what the odd
+    // passage's own letter says elsewhere, then the other letters; the latest passage of each.
+    const copied = (s: Source) =>
+      minor.some((m) => overlap(record.passage(m.passageId)?.text ?? m.quote, s.quote) >= 0.6);
+    const sameLetter = (s: Source) => minor.some((m) => m.documentId === s.documentId);
+    const rank = (s: Source) => (copied(s) ? 0 : sameLetter(s) ? 1 : 2);
+    const latest = [...new Map([...major].reverse().map((s) => [s.documentId, s])).values()];
+    const shown = latest
       .reverse()
+      .sort((a, b) => rank(a) - rank(b))
       .slice(0, 3);
     const where = [
       ...new Set(minor.map((s) => `the ${s.documentTitle} (${dayMonthYear(s.documentDate)})`)),
     ];
+    const itself = minor.some((m) => major.some((s) => s.documentId === m.documentId))
+      ? `, which elsewhere puts it on the ${majorSide}`
+      : "";
+    const plain = ({ term: _, ...source }: Sided): Source => source;
+    const label = { left: "Left", right: "Right" };
     return [
       {
         id: `r-side-carotid-${percent}`,
         method: "rule",
-        summary: `The ${percent}% carotid stenosis is on the ${majorSide} in ${major.length} passages but on the ${minorSide} in ${where.join(" and ")}.`,
-        passages: [...minor, ...shown],
+        summary: `The ${percent}% carotid stenosis is on the ${majorSide} in ${major.length} passages but on the ${minorSide} in ${where.join(" and ")}${itself}.`,
+        passages: [...minor, ...shown].map(plain),
+        claims: [
+          { label: label[minorSide], total: minor.length, passages: minor },
+          { label: label[majorSide], total: major.length, passages: shown },
+        ],
       },
     ];
   });

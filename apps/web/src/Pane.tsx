@@ -3,6 +3,7 @@ import { FileText } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { formatDate } from "./components/ui";
 import { type DocumentTarget, highlight } from "./DocumentPanel";
+import { cites } from "./hoverLinks";
 import { usePatientId } from "./patient";
 import { loadDocument } from "./SourcePopover";
 
@@ -15,10 +16,11 @@ export const PANE =
 
 /**
  * On narrow screens a selection opens the pane as a sheet over the list's foot. While a document
- * is open beside the screen the sheet would cover it, so it stays hidden until the document closes.
+ * or a comparison is open beside the screen the sheet would cover it, so it stays hidden until
+ * that closes.
  */
 export const SHEET =
-  "ui-enter-up @max-4xl:group-data-[letter]/screen:hidden @max-4xl:fixed @max-4xl:inset-x-3 @max-4xl:bottom-3 @max-4xl:z-40 @max-4xl:mx-0 @max-4xl:mb-0 @max-4xl:max-h-[75dvh] @max-4xl:overflow-y-auto @max-4xl:shadow-[0_12px_32px_rgb(0_0_0/0.12)]";
+  "ui-enter-up @max-4xl:group-data-[beside]/screen:hidden @max-4xl:fixed @max-4xl:inset-x-3 @max-4xl:bottom-3 @max-4xl:z-40 @max-4xl:mx-0 @max-4xl:mb-0 @max-4xl:max-h-[75dvh] @max-4xl:overflow-y-auto @max-4xl:shadow-[0_12px_32px_rgb(0_0_0/0.12)]";
 
 export function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -49,7 +51,7 @@ export function SourceQuote({
   const before = index > 0 ? document?.passages[index - 1] : undefined;
   const after = index >= 0 ? document?.passages[index + 1] : undefined;
   return (
-    <div className="rounded-xl bg-surface px-3 py-2.5">
+    <div {...cites([source])} className="rounded-xl bg-surface px-3 py-2.5">
       <p className="mb-1 flex items-start gap-1.5 text-2xs text-muted-foreground">
         <FileText className="mt-px size-3 shrink-0" aria-hidden />
         <span className="min-w-0 flex-1">

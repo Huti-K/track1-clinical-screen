@@ -110,6 +110,12 @@ describe("carotid side check", () => {
     const [found] = sides(r);
     expect(found?.summary).toMatch(/70% carotid stenosis/);
     expect(found?.passages.map((p) => p.documentId).sort()).toEqual(["A", "B"]);
+    expect(
+      found?.claims?.map((c) => [c.label, c.passages.map((p) => [p.documentId, p.term])]),
+    ).toEqual([
+      ["Right", [["B", "Rechts"]]],
+      ["Left", [["A", "links"]]],
+    ]);
   });
 
   it("does not compare stenoses of different degree", () => {

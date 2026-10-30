@@ -12,6 +12,7 @@ import {
 } from "react";
 import { api } from "./api";
 import { Button, cx, ErrorText, formatDate } from "./components/ui";
+import { useHoveredPassages } from "./hoverLinks";
 import { usePatientId } from "./patient";
 import { DOCUMENT_PANE_KEY } from "./prefs";
 import { SidePane } from "./resize";
@@ -69,6 +70,8 @@ const SHEET =
   "shadow-[0_0_0_1px_rgb(0_0_0/0.04),0_1px_3px_rgb(0_0_0/0.08),0_10px_28px_rgb(0_0_0/0.07)]";
 /** The cited passage: a highlighter tint that fades in; a bar marks its lines in the margin. */
 const CITED = "bg-accent-wash motion-safe:animate-paper-cite";
+/** A passage that the line hovered on the screen cites: outlined, so it reads apart from the cited one. */
+const HOVERED = "rounded-[2px] outline-[1.5px] outline-accent outline-offset-1";
 /** A line that opens with a label, such as `Größe: 170 cm`, sets the label bold. */
 const LABEL = /^[^:]{2,40}:(?=\s)/;
 /** The dose columns of a medication table: morning, midday, evening and night. */
@@ -180,6 +183,7 @@ function Line({
   label: boolean;
   shared: Shared;
 }) {
+  const hovered = useHoveredPassages(ids);
   return (
     <div data-unit={unit || undefined}>
       {ids.map((id, index) => {
@@ -191,7 +195,12 @@ function Line({
             {index > 0 && " "}
             <span
               data-passage={id}
-              className={isCited ? cx(CITED, "rounded-[2px] box-decoration-clone") : undefined}
+              className={
+                cx(
+                  isCited && cx(CITED, "rounded-[2px] box-decoration-clone"),
+                  hovered.has(id) && HOVERED,
+                ) || undefined
+              }
             >
               {highlight(text, isCited ? target.quote : undefined, bold)}
             </span>
@@ -214,6 +223,7 @@ function Table({
   shared: Shared;
 }) {
   const rows: LetterRow[] = [block.head, ...block.rows];
+  const hovered = useHoveredPassages(rows.map((row) => row.passageId));
   const heads = block.head.cells;
   // The part of a table continued from the page before repeats the column heads, as print does.
   const continued = lines[0] !== 0;
@@ -241,7 +251,11 @@ function Table({
               key={repeated ? "heads" : row.passageId}
               data-unit={repeated ? undefined : true}
               data-passage={repeated ? undefined : row.passageId}
-              className={cx(index === 0 && "font-bold", cited && CITED)}
+              className={cx(
+                index === 0 && "font-bold",
+                cited && CITED,
+                !repeated && hovered.has(row.passageId) && HOVERED,
+              )}
             >
               {row.cells.map((cell, column) => {
                 const span = column === row.cells.length - 1 ? heads.length - column : 1;

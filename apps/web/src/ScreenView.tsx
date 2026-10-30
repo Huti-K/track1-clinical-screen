@@ -40,9 +40,11 @@ import {
 } from "react";
 import { api } from "./api";
 import { ClarifyList, ClarifyPane, type NoteInput, noteTime } from "./Clarify";
+import { RangeBar, referenceOf, Sparkline, type TrendChart } from "./charts";
 import { Avatar, Button, cx, formatDate, Keys, Sex } from "./components/ui";
 import type { DocumentTarget } from "./DocumentPanel";
 import { screenText } from "./exportText";
+import { cites, LIT, useCitesHovered } from "./hoverLinks";
 import { Field, PANE, SHEET, SourceQuote } from "./Pane";
 import { answersKey, DETAIL_WIDTH_KEY, useStored } from "./prefs";
 import { RecordSearch } from "./RecordSearch";
@@ -93,6 +95,8 @@ export type Line = {
   note?: Note;
   /** A topic the screen left out, which the pane offers to ask about. */
   leftOut?: boolean;
+  /** For a measurement documented more than once, its points for the sparkline. */
+  trend?: TrendChart;
 };
 
 type Section = { title: string; aside?: string; lines: Line[] };
@@ -272,6 +276,9 @@ export function layoutScreen(result: ScreenResponse) {
   const trends: Line[] = (result.trends ?? []).map((t) => {
     const sources = t.points.flatMap((p) => p.sources);
     const last = t.points.at(-1);
+    // The chart shows when; beside it the change alone, so a contradiction's badge still fits.
+    const delta = Math.round(((last?.value ?? 0) - (t.points[0]?.value ?? 0)) * 10) / 10;
+    const sign = delta > 0 ? "+" : delta < 0 ? "−" : "±";
     return {
       key: key(),
       topic: "Over time",
@@ -283,6 +290,10 @@ export function layoutScreen(result: ScreenResponse) {
       tone: "plain",
       conflict: conflictOf(sources),
       checks: [],
+      trend: {
+        points: t.points.map((p) => ({ ...p, flagged: conflictOf(p.sources) !== undefined })),
+        change: `${sign}${Math.abs(delta)} ${t.unit}`,
+      },
     };
   });
   const nonEmpty = (sections: Section[]) => sections.filter((s) => s.lines.length > 0);
@@ -434,15 +445,18 @@ function LineRow({
 }) {
   const months = monthsOld(line);
   const gap = line.tone === "gap";
+  const reference = gap || line.trend ? undefined : referenceOf(line.label, line.value);
+  const lit = useCitesHovered(line.sources);
   return (
     <button
       type="button"
       onClick={() => onSelect(line.key)}
       aria-pressed={selected}
       title={[line.label, line.value, line.detail, line.action].filter(Boolean).join(" · ")}
+      {...cites(line.sources)}
       className={cx(
         "grid w-full cursor-pointer grid-cols-[14px_minmax(0,1fr)] items-baseline gap-x-2.5 rounded-lg px-2 py-[5px] text-left text-[13px] transition-colors duration-150 [&>span]:min-w-0 @xl/list:col-span-5 @xl/list:grid-cols-subgrid @xl/list:whitespace-nowrap @xl/list:[&>span:not(:first-child)]:truncate",
-        selected ? "bg-accent-wash" : "hover:bg-surface-2",
+        selected ? "bg-accent-wash" : lit ? LIT : "hover:bg-surface-2",
       )}
     >
       <span className="translate-y-0.5 self-start">
@@ -468,8 +482,16 @@ function LineRow({
             {line.detail && line.action ? " · " : ""}
             <span className="text-accent-text">{line.action}</span>
           </>
+        ) : line.trend ? (
+          <>
+            <Sparkline chart={line.trend} />
+            {line.trend.change}
+          </>
         ) : (
-          line.detail
+          <>
+            {reference && <RangeBar reference={reference} />}
+            {line.detail ?? reference?.text}
+          </>
         )}
         <Chips kinds={line.checks} advice={line.advice} />
         {line.conflict && (
@@ -570,6 +592,52 @@ function Slots({ schedule }: { schedule?: string }) {
   );
 }
 
+function DrugRow({
+  line,
+  selected,
+  onSelect,
+}: {
+  line: Line;
+  selected: boolean;
+  onSelect: (key: string) => void;
+}) {
+  const drug = line.drug ?? { name: line.label };
+  const lit = useCitesHovered(line.sources);
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(line.key)}
+      aria-pressed={selected}
+      title={[drug.brand, line.value, line.detail].filter(Boolean).join(" · ")}
+      {...cites(line.sources)}
+      className={cx(
+        "grid w-full cursor-pointer grid-cols-[14px_minmax(0,1fr)_auto] items-center gap-x-2.5 rounded-lg px-2 py-[4px] text-left text-[13px] whitespace-nowrap transition-colors duration-150 @xl/list:col-span-5 @xl/list:grid-cols-subgrid",
+        selected ? "bg-accent-wash" : lit ? LIT : "hover:bg-surface-2",
+      )}
+    >
+      <span>
+        {line.conflict && (
+          <TriangleAlert className="size-3.5 text-warning" aria-label="In a contradiction" />
+        )}
+      </span>
+      <span className="flex min-w-0 items-baseline font-semibold">
+        <span className="truncate">{drug.name}</span>
+        <span className="shrink-0">
+          <Chips kinds={line.checks} advice={line.advice} />
+        </span>
+      </span>
+      <span className="tabular-nums">{drug.dose}</span>
+      <span className="flex min-w-0 items-center gap-2 overflow-hidden">
+        <Slots schedule={drug.schedule} />
+        <span className="text-muted-foreground">{route(drug.route)}</span>
+      </span>
+      <span className="text-right text-xs text-muted-foreground tabular-nums">
+        {line.date ? monthYear(line.date) : ""}
+      </span>
+    </button>
+  );
+}
+
 function MedicationTable({
   lines,
   selected,
@@ -583,42 +651,9 @@ function MedicationTable({
   const [date] = dates;
   return (
     <Margin title="Meds" aside={dates.size === 1 && date ? formatDate(date) : undefined}>
-      {lines.map((line) => {
-        const drug = line.drug ?? { name: line.label };
-        return (
-          <button
-            key={line.key}
-            type="button"
-            onClick={() => onSelect(line.key)}
-            aria-pressed={line.key === selected}
-            title={[drug.brand, line.value, line.detail].filter(Boolean).join(" · ")}
-            className={cx(
-              "grid w-full cursor-pointer grid-cols-[14px_minmax(0,1fr)_auto] items-center gap-x-2.5 rounded-lg px-2 py-[4px] text-left text-[13px] whitespace-nowrap transition-colors duration-150 @xl/list:col-span-5 @xl/list:grid-cols-subgrid",
-              line.key === selected ? "bg-accent-wash" : "hover:bg-surface-2",
-            )}
-          >
-            <span>
-              {line.conflict && (
-                <TriangleAlert className="size-3.5 text-warning" aria-label="In a contradiction" />
-              )}
-            </span>
-            <span className="flex min-w-0 items-baseline font-semibold">
-              <span className="truncate">{drug.name}</span>
-              <span className="shrink-0">
-                <Chips kinds={line.checks} advice={line.advice} />
-              </span>
-            </span>
-            <span className="tabular-nums">{drug.dose}</span>
-            <span className="flex min-w-0 items-center gap-2 overflow-hidden">
-              <Slots schedule={drug.schedule} />
-              <span className="text-muted-foreground">{route(drug.route)}</span>
-            </span>
-            <span className="text-right text-xs text-muted-foreground tabular-nums">
-              {line.date ? monthYear(line.date) : ""}
-            </span>
-          </button>
-        );
-      })}
+      {lines.map((line) => (
+        <DrugRow key={line.key} line={line} selected={line.key === selected} onSelect={onSelect} />
+      ))}
     </Margin>
   );
 }
@@ -806,6 +841,7 @@ function Overview({
   const item = (c: Contradiction) => (
     <div
       key={c.id}
+      {...cites(c.passages)}
       className="grid grid-cols-[16px_1fr] gap-2.5 py-2 text-[13px] [&+&]:shadow-[inset_0_1px_0_var(--border)]"
     >
       <TriangleAlert className="mt-0.5 size-3.5 text-warning" aria-hidden />
@@ -826,7 +862,7 @@ function Overview({
       <ClarifyList items={clarify} notes={notes} onSelect={onSelect} />
       {relevant.length > 0 && (
         <>
-          <h2 className="mt-5 text-[13px] font-semibold tracking-tight">
+          <h2 className="mt-6 pt-5 text-[13px] font-semibold tracking-tight shadow-[inset_0_1px_0_var(--border)]">
             Contradictions on this screen
           </h2>
           <div className="mt-1">{relevant.map(item)}</div>
@@ -1032,6 +1068,38 @@ function AskedSection({
   );
 }
 
+function BasicChip({
+  line,
+  selected,
+  onSelect,
+  children,
+}: {
+  line: Line;
+  selected: boolean;
+  onSelect: (key: string) => void;
+  children: ReactNode;
+}) {
+  const lit = useCitesHovered(line.sources);
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(line.key)}
+      aria-pressed={selected}
+      title={[line.label, line.value, line.detail, line.date && monthYear(line.date)]
+        .filter(Boolean)
+        .join(" · ")}
+      {...cites(line.sources)}
+      className={cx(
+        "-mx-1 inline-flex cursor-pointer items-center gap-1 rounded-md px-1 transition-colors duration-150",
+        selected ? "bg-accent-wash" : lit ? LIT : "hover:bg-surface-2",
+      )}
+    >
+      {children}
+      {(line.conflict || monthsOld(line) !== undefined) && <LineIcon line={line} />}
+    </button>
+  );
+}
+
 /** What every screen shows about her, whatever the task: who she is, her body measures, allergies and known problems, a labelled column each. */
 function PatientStrip({
   patient,
@@ -1047,22 +1115,9 @@ function PatientStrip({
   const [all, setAll] = useState(false);
   const FEW = 7;
   const chip = (line: Line, content: ReactNode) => (
-    <button
-      key={line.key}
-      type="button"
-      onClick={() => onSelect(line.key)}
-      aria-pressed={selected === line.key}
-      title={[line.label, line.value, line.detail, line.date && monthYear(line.date)]
-        .filter(Boolean)
-        .join(" · ")}
-      className={cx(
-        "-mx-1 inline-flex cursor-pointer items-center gap-1 rounded-md px-1 transition-colors duration-150",
-        selected === line.key ? "bg-accent-wash" : "hover:bg-surface-2",
-      )}
-    >
+    <BasicChip key={line.key} line={line} selected={selected === line.key} onSelect={onSelect}>
       {content}
-      {(line.conflict || monthsOld(line) !== undefined) && <LineIcon line={line} />}
-    </button>
+    </BasicChip>
   );
   const dot = <span className="px-1 text-muted-foreground">·</span>;
   const column = (label: string, value: ReactNode, detail?: ReactNode, danger = false) => (
@@ -1235,7 +1290,7 @@ export function ScreenView({
   result,
   layout,
   notes,
-  letterOpen,
+  besideOpen,
   onOpenLetter,
   onCompare,
   onRole,
@@ -1246,8 +1301,8 @@ export function ScreenView({
   layout: Layout;
   /** What clinicians recorded after the documents, for every screen of the patient. */
   notes: Note[];
-  /** Whether a document is open beside the screen. */
-  letterOpen: boolean;
+  /** Whether a document or a comparison is open beside the screen. */
+  besideOpen: boolean;
   onOpenLetter: (target: DocumentTarget) => void;
   onCompare: (c: Contradiction) => void;
   onRole: (role: string) => void;
@@ -1334,7 +1389,7 @@ export function ScreenView({
     <div
       ref={grid}
       style={{ "--detail-width": `${detailWidth}px` } as CSSProperties}
-      data-letter={letterOpen || undefined}
+      data-beside={besideOpen || undefined}
       className="group/screen flex flex-col @4xl:min-h-0 @4xl:flex-1 @4xl:flex-row"
     >
       <div className="min-w-0 flex-1 px-4 py-8 sm:px-10 lg:px-14 @4xl:overflow-y-auto @4xl:[scrollbar-gutter:stable]">
@@ -1446,6 +1501,7 @@ export function ScreenView({
                       type="button"
                       onClick={() => select(topic.key)}
                       aria-pressed={topic.key === selected}
+                      {...cites(topic.sources)}
                       className={cx(
                         "cursor-pointer hover:text-foreground hover:underline",
                         topic.key === selected && "text-foreground underline",

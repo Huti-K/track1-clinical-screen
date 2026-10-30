@@ -21,6 +21,7 @@ import {
 import { type FormEvent, useState } from "react";
 import { Button, cx, formatDate } from "./components/ui";
 import type { DocumentTarget } from "./DocumentPanel";
+import { cites, LIT, useCitesHovered } from "./hoverLinks";
 import { Field, PANE, SHEET, SourceQuote } from "./Pane";
 
 export type NoteInput = Pick<Note, "topic" | "text" | "source" | "clarifies">;
@@ -50,7 +51,9 @@ export const WHO: Record<
 };
 
 const ORDER: ClarifyFrom[] = ["patient", "test", "records"];
-const SHOWN = 5;
+/** The pane has the height for this many; only a longer list folds, down to {@link SHOWN}. */
+const FOLD_ABOVE = 10;
+const SHOWN = 8;
 const WHY: Record<Clarification["trigger"], string> = {
   gap: "Missing",
   contradiction: "Conflict",
@@ -83,26 +86,33 @@ function Row({
   note?: Note;
   onSelect: (id: string) => void;
 }) {
+  const lit = useCitesHovered(item.sources);
   return (
-    <button
-      type="button"
-      onClick={() => onSelect(item.id)}
-      className="grid w-full cursor-pointer grid-cols-[16px_minmax(0,1fr)] gap-2 rounded-lg px-2 py-1.5 text-left text-[13px] transition-colors duration-150 hover:bg-surface-2"
-    >
-      <span className="translate-y-0.5">
-        <TriggerIcon item={item} answered={Boolean(note)} />
-      </span>
-      <span className="min-w-0">
-        <span className={cx("block leading-snug", note && "text-muted-foreground")}>
-          <span className="font-semibold">{item.topic}</span>
-          <span className="text-muted-foreground"> · </span>
-          {item.step}
+    <div className="py-1 [&+&]:shadow-[inset_0_1px_0_var(--border)]">
+      <button
+        type="button"
+        onClick={() => onSelect(item.id)}
+        {...cites(item.sources)}
+        className={cx(
+          "grid w-full cursor-pointer grid-cols-[16px_minmax(0,1fr)] gap-2 rounded-lg px-2 py-1.5 text-left text-[13px] transition-colors duration-150",
+          lit ? LIT : "hover:bg-surface-2",
+        )}
+      >
+        <span className="translate-y-0.5">
+          <TriggerIcon item={item} answered={Boolean(note)} />
         </span>
-        <span className="mt-0.5 line-clamp-1 block text-xs text-muted-foreground">
-          {note ? `“${note.text}”` : item.reason}
+        <span className="min-w-0">
+          <span className={cx("block leading-snug", note && "text-muted-foreground")}>
+            <span className="font-semibold">{item.topic}</span>
+            <span className="text-muted-foreground"> · </span>
+            {item.step}
+          </span>
+          <span className="mt-0.5 line-clamp-1 block text-xs text-muted-foreground">
+            {note ? `“${note.text}”` : item.reason}
+          </span>
         </span>
-      </span>
-    </button>
+      </button>
+    </div>
   );
 }
 
@@ -122,9 +132,12 @@ export function ClarifyList({
   const [more, setMore] = useState(false);
   const [showAnswered, setShowAnswered] = useState(false);
   const noteOf = (item: Clarification) => notes.filter((n) => n.clarifies === item.id).at(-1);
-  const open = items.filter((item) => !noteOf(item));
+  const open = items
+    .filter((item) => !noteOf(item))
+    .sort((a, b) => ORDER.indexOf(a.from) - ORDER.indexOf(b.from));
   const answered = items.filter((item) => noteOf(item));
-  const shown = more ? open : open.slice(0, SHOWN);
+  const folds = open.length > FOLD_ABOVE;
+  const shown = folds && !more ? open.slice(0, SHOWN) : open;
   const row = (item: Clarification) => (
     <Row key={item.id} item={item} note={noteOf(item)} onSelect={onSelect} />
   );
@@ -134,12 +147,6 @@ export function ClarifyList({
   })).filter((g) => g.rows.length > 0);
   return (
     <section aria-label="To clarify">
-      <h2 className="flex items-baseline gap-2 text-[13px] font-semibold tracking-tight">
-        To clarify
-        <span className="text-xs font-normal text-muted-foreground">
-          {open.length > 0 ? `${open.length} open` : "nothing open"}
-        </span>
-      </h2>
       {items.length === 0 && (
         <p className="mt-2 text-xs text-muted-foreground">
           Every need on this screen is documented, current and consistent.
@@ -148,9 +155,9 @@ export function ClarifyList({
       {groups.map(({ from, rows }) => {
         const { title, icon: Icon } = WHO[from];
         return (
-          <div key={from} className="mt-3">
+          <div key={from} className="mt-3 [&+&]:mt-5">
             {groups.length > 1 && (
-              <h3 className="mb-0.5 flex items-center gap-1.5 px-2 text-2xs font-medium text-muted-foreground">
+              <h3 className="mb-1 flex items-center gap-1.5 px-2 text-2xs font-medium tracking-wide text-muted-foreground uppercase">
                 <Icon className="size-3" aria-hidden />
                 {title}
               </h3>
@@ -159,7 +166,7 @@ export function ClarifyList({
           </div>
         );
       })}
-      {open.length > SHOWN && (
+      {folds && (
         <button
           type="button"
           onClick={() => setMore(!more)}
@@ -174,7 +181,7 @@ export function ClarifyList({
             type="button"
             onClick={() => setShowAnswered(!showAnswered)}
             aria-expanded={showAnswered}
-            className="mt-2 flex cursor-pointer items-center gap-1.5 px-2 text-xs text-muted-foreground hover:text-foreground"
+            className="mt-3 flex w-full cursor-pointer items-center gap-1.5 px-2 pt-3 text-xs text-muted-foreground shadow-[inset_0_1px_0_var(--border)] hover:text-foreground"
           >
             {answered.length} answered
             <ChevronDown
@@ -234,7 +241,7 @@ export function ClarifyPane({
   onAddNote: (note: NoteInput) => Promise<void>;
   onRemoveNote: (id: string) => void;
 }) {
-  const { title, icon: Icon, placeholder, source } = WHO[item.from];
+  const { placeholder, source } = WHO[item.from];
   const recorded = notes.filter((n) => n.clarifies === item.id);
   const [text, setText] = useState("");
   const [saving, setSaving] = useState(false);
@@ -256,21 +263,17 @@ export function ClarifyPane({
   }
 
   return (
-    <aside aria-label="Open point" className={cx(PANE, SHEET)}>
-      <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-        <Icon className="size-3.5" aria-hidden />
-        <span className="min-w-0 flex-1 truncate">To clarify · {title}</span>
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label="Close"
-          onClick={onClose}
-          className="-my-1.5 -mr-2"
-        >
-          <X className="size-4" />
-        </Button>
-      </p>
-      <h3 className="mt-1 text-[22px] leading-tight font-semibold tracking-tight">{item.step}</h3>
+    <aside aria-label="Open point" className={cx(PANE, SHEET, "relative")}>
+      <Button
+        variant="ghost"
+        size="icon"
+        aria-label="Close"
+        onClick={onClose}
+        className="absolute top-3 right-3"
+      >
+        <X className="size-4" />
+      </Button>
+      <h3 className="pr-10 text-[22px] leading-tight font-semibold tracking-tight">{item.step}</h3>
       <dl className="mt-3 grid grid-cols-[88px_minmax(0,1fr)] items-baseline gap-x-3 gap-y-1.5 text-[13px]">
         <Field label="Topic">{item.topic}</Field>
         <Field label={WHY[item.trigger]}>

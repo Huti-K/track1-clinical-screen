@@ -104,12 +104,23 @@ export type Need = {
 /** A topic the record documents that the screen left out because the task does not need it. */
 export type LeftOut = { topic: string; sources: Source[] };
 
+/** One side of a contradiction: what some passages say, such as "Right". */
+export type Claim = {
+  label: string;
+  /** How many passages say it; `passages` shows a few of them. */
+  total: number;
+  /** Each with `term`, the words in its quote that say it, such as "Rechts". */
+  passages: (Source & { term: string })[];
+};
+
 export type Contradiction = {
   id: string;
   summary: string;
   passages: Source[];
   /** `rule`: found by arithmetic or a fixed check on the passages; `model`: found by the LLM. */
   method?: "rule" | "model";
+  /** For a check that knows what each passage says, the passages split by it. */
+  claims?: Claim[];
 };
 
 /** One documented value of a measurement, with the passage that states it. */

@@ -19,7 +19,7 @@ import type { ModelThinkingLevel } from "@earendil-works/pi-ai/providers/model-s
 import { MemoryStorage } from "@earendil-works/pi-durable";
 import type { Contradiction, ScreenResponse, Source } from "@track1/shared";
 import type { Retrieval } from "../src/agent/clinical.js";
-import { parseModel } from "../src/config.js";
+import { config, parseModel } from "../src/config.js";
 import { openConfigured } from "../src/open.js";
 import { HELDOUT, HELDOUT_ANSWERS, HELDOUT_EXPECTED } from "./heldout.js";
 import { gradeAnswer, gradeContradictions, screenText } from "./rubric.js";
@@ -165,6 +165,8 @@ async function run(
   only: number[],
   set: string,
 ): Promise<RunSummary> {
+  // Built before the first screen whenever screens use it, so no screen's time includes it.
+  const retrieval = spec.retrieval ?? config.retrieval;
   const expected = [
     ...(JSON.parse(readFileSync(join(root, "cases/expected.json"), "utf8")) as Expected[]),
     ...HELDOUT_EXPECTED.map((e) => ({ ...e, sources: [] })),
@@ -198,7 +200,7 @@ async function run(
     const graded = gradeContradictions(found);
     console.log(`[${spec.label}] scan: ${found.length} in ${(scanMs / 1000).toFixed(1)} s`);
     let index: { ms: number; facts: number } | undefined;
-    if (spec.retrieval === "index") {
+    if (retrieval === "index") {
       started = Date.now();
       const facts = await runtime.factIndex();
       index = { ms: Date.now() - started, facts: facts.length };
@@ -232,7 +234,7 @@ async function run(
       model: runtime.modelName,
       scanMs,
       ...(index ? { indexMs: index.ms, indexFacts: index.facts } : {}),
-      ...(spec.retrieval === "index" ? { review: await runtime.indexReview() } : {}),
+      ...(retrieval === "index" ? { review: await runtime.indexReview() } : {}),
       contradictions: {
         found: found.length,
         known: graded.known,

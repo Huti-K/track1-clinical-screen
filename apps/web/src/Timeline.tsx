@@ -31,6 +31,7 @@ import {
 import { Fragment, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { cx, formatDate } from "./components/ui";
 import { keysOf, SHORTCUTS } from "./hotkeys";
+import { standsFor, useDocumentHovered } from "./hoverLinks";
 import { citationsOf, departmentOf, type Stay, staysOf } from "./stays";
 
 /** A screen built in this browser, listed so the clinician can go back to it. */
@@ -267,6 +268,7 @@ function DocumentCard({
       ref={keepOnScreen}
       onMouseEnter={onEnter}
       onMouseLeave={onLeave}
+      {...standsFor(doc.id)}
       style={{ top: card.top, left: card.left }}
       className="ui-enter-up fixed z-50 w-80 rounded-xl bg-surface p-3.5 text-xs shadow-[0_12px_32px_rgb(0_0_0/0.08)] ring-1 ring-border"
     >
@@ -313,6 +315,70 @@ function DocumentCard({
         Open letter <ArrowRight className="size-3" aria-hidden />
       </button>
     </div>
+  );
+}
+
+/** A document on the line; it lights up while a line it is cited by is hovered on the screen. */
+function DocumentRow({
+  doc,
+  cited,
+  conflicted,
+  current,
+  dimmed,
+  onOpen,
+  onHover,
+  onLeave,
+}: {
+  doc: DocumentInfo;
+  /** How many facts on the screen it gives. */
+  cited: number;
+  conflicted: boolean;
+  current: boolean;
+  /** A screen is on display, so an uncited document's name steps back. */
+  dimmed: boolean;
+  onOpen: () => void;
+  onHover: (row: HTMLElement, delay: number) => void;
+  onLeave: () => void;
+}) {
+  const { label, icon } = kindOf(doc);
+  const lit = useDocumentHovered(doc.id);
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      onMouseEnter={(e) => onHover(e.currentTarget, 350)}
+      onMouseLeave={onLeave}
+      onFocus={(e) => e.currentTarget.matches(":focus-visible") && onHover(e.currentTarget, 0)}
+      onBlur={onLeave}
+      {...standsFor(doc.id)}
+      aria-current={current ? "true" : undefined}
+      className={cx(
+        "relative grid h-10 w-full cursor-pointer grid-cols-[22px_minmax(0,1fr)_auto] items-center gap-x-2.5 rounded-lg pr-2 pl-[9px] text-left transition-colors duration-150",
+        lit ? "bg-accent-wash" : current ? "bg-hover" : "hover:bg-surface-2",
+      )}
+    >
+      <Node icon={icon} tone={lit ? "current" : cited ? "cited" : "plain"} warn={conflicted} />
+      <span className="min-w-0">
+        <span
+          className={cx(
+            "block truncate text-[13px]",
+            cited || lit ? "font-medium" : dimmed && "text-muted-foreground",
+            lit && "text-accent-text",
+          )}
+        >
+          {label}
+        </span>
+        <span className="block truncate text-2xs text-muted-foreground tabular-nums">
+          {formatDate(doc.date)} · {departmentOf(doc.department)}
+        </span>
+      </span>
+      {cited > 0 && (
+        <span className="grid h-[18px] min-w-[22px] place-items-center rounded-full bg-accent-wash px-1.5 text-2xs font-semibold text-accent-text tabular-nums">
+          {cited}
+          <span className="sr-only"> {cited === 1 ? "fact" : "facts"} on this screen</span>
+        </span>
+      )}
+    </button>
   );
 }
 
@@ -376,49 +442,19 @@ export function Timeline({
     onDocument(doc);
   };
 
-  const row = (doc: DocumentInfo) => {
-    const { label, icon } = kindOf(doc);
-    const cited = facts.get(doc.id)?.length ?? 0;
-    return (
-      <button
-        key={doc.id}
-        type="button"
-        onClick={() => open(doc)}
-        onMouseEnter={(e) => cards && hover.show(doc, e.currentTarget, 350)}
-        onMouseLeave={() => cards && hover.hide()}
-        onFocus={(e) =>
-          cards && e.currentTarget.matches(":focus-visible") && hover.show(doc, e.currentTarget, 0)
-        }
-        onBlur={() => cards && hover.hide()}
-        aria-current={doc.id === documentId ? "true" : undefined}
-        className={cx(
-          "relative grid h-10 w-full cursor-pointer grid-cols-[22px_minmax(0,1fr)_auto] items-center gap-x-2.5 rounded-lg pr-2 pl-[9px] text-left transition-colors duration-150",
-          doc.id === documentId ? "bg-hover" : "hover:bg-surface-2",
-        )}
-      >
-        <Node icon={icon} tone={cited ? "cited" : "plain"} warn={conflicts.has(doc.id)} />
-        <span className="min-w-0">
-          <span
-            className={cx(
-              "block truncate text-[13px]",
-              cited ? "font-medium" : screen && "text-muted-foreground",
-            )}
-          >
-            {label}
-          </span>
-          <span className="block truncate text-2xs text-muted-foreground tabular-nums">
-            {formatDate(doc.date)} · {departmentOf(doc.department)}
-          </span>
-        </span>
-        {cited > 0 && (
-          <span className="grid h-[18px] min-w-[22px] place-items-center rounded-full bg-accent-wash px-1.5 text-2xs font-semibold text-accent-text tabular-nums">
-            {cited}
-            <span className="sr-only"> {cited === 1 ? "fact" : "facts"} on this screen</span>
-          </span>
-        )}
-      </button>
-    );
-  };
+  const row = (doc: DocumentInfo) => (
+    <DocumentRow
+      key={doc.id}
+      doc={doc}
+      cited={facts.get(doc.id)?.length ?? 0}
+      conflicted={conflicts.has(doc.id)}
+      current={doc.id === documentId}
+      dimmed={Boolean(screen)}
+      onOpen={() => open(doc)}
+      onHover={(row, delay) => cards && hover.show(doc, row, delay)}
+      onLeave={() => cards && hover.hide()}
+    />
+  );
 
   const group = (stay: Stay) => {
     const inStay = new Set(
