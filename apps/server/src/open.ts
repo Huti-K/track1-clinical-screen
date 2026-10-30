@@ -4,6 +4,7 @@ import type { Storage } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { loadPatientRecords } from "@track1/patient-record";
 import { ClinicalRuntime, type RuntimeOptions } from "./agent/runtime.js";
+import { Slots } from "./agent/slots.js";
 import { FileCredentialStore } from "./auth/credentials.js";
 import { SubscriptionLogin } from "./auth/login.js";
 import { config, storePathFor } from "./config.js";
@@ -34,6 +35,7 @@ export async function openConfigured(
     throw new Error(`Unknown model ${provider}/${modelId}. Set MODEL=provider/modelId.`);
   mkdirSync(config.storeDir, { recursive: true });
   const backgroundModel = overrides.backgroundModel ?? config.backgroundModel;
+  const backgroundSlots = new Slots(config.backgroundConcurrency);
   const runtimes = await Promise.all(
     records.map(async (record) => {
       const { id } = record.summary;
@@ -44,8 +46,10 @@ export async function openConfigured(
         thinking: overrides.thinking ?? {
           screen: config.screenThinking,
           scan: config.scanThinking,
+          index: config.indexThinking,
         },
         retrieval: overrides.retrieval ?? config.retrieval,
+        backgroundSlots,
         ...(backgroundModel ? { backgroundModel } : {}),
         ...(overrides.timeoutMs ? { timeoutMs: overrides.timeoutMs } : {}),
         record,

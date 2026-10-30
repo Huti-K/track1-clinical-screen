@@ -37,8 +37,12 @@ export const config = {
   /** Reasoning effort per job: screens must be fast, the one-off contradiction scan thorough. */
   screenThinking: thinking(process.env.SCREEN_THINKING, "low"),
   scanThinking: thinking(process.env.SCAN_THINKING, "high"),
+  /** The fact index and its review run in parallel parts; their reasoning sets how fast it is ready. */
+  indexThinking: thinking(process.env.INDEX_THINKING, "low"),
   /** ChatGPT's fast mode for every OpenAI request: quicker, but it uses the plan's limits about twice as fast. */
   serviceTier: serviceTier(process.env.SERVICE_TIER),
+  /** Background model runs at once across all patients: more is faster until the rate limit. */
+  backgroundConcurrency: Number(process.env.BACKGROUND_CONCURRENCY ?? 16),
   retrieval: retrieval(process.env.RETRIEVAL),
 };
 

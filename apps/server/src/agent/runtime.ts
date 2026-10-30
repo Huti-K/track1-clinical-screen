@@ -32,6 +32,7 @@ import {
   CONTRADICTION_RULES,
   ContradictionsDoc,
   contradictionsExtension,
+  documentText,
   type Retrieval,
   recordExtension,
   SCREEN_RULES,
@@ -41,12 +42,15 @@ import {
 } from "./clinical.js";
 import {
   FactIndexDoc,
-  FactReviewDoc,
   factIndexSection,
   INDEX_RULES,
   type IndexedFact,
+  type IndexPart,
+  IndexPartDoc,
   indexExtension,
+  indexParts,
   REVIEW_RULES,
+  ReviewPartDoc,
   reviewExtension,
   withCategories,
 } from "./factIndex.js";
@@ -60,6 +64,7 @@ import {
   trendsFor,
 } from "./measurements.js";
 import { safetyChecks } from "./safety.js";
+import { inBackground, Slots } from "./slots.js";
 
 const context = BACKGROUND_CONTEXT;
 
@@ -122,7 +127,8 @@ export interface RuntimeOptions {
   storage: Storage;
   models: Models;
   model: ModelRef;
-  thinking?: { screen: ModelThinkingLevel; scan: ModelThinkingLevel };
+  /** `index` is for the fact index and its review; default `scan`. */
+  thinking?: { screen: ModelThinkingLevel; scan: ModelThinkingLevel; index?: ModelThinkingLevel };
   /** How screens reach the documents; the contradiction scan always reads the whole record. */
   retrieval?: Retrieval;
   /** How many contradiction passes run, each looking for what the earlier ones missed; default 2. */
@@ -130,6 +136,10 @@ export interface RuntimeOptions {
   /** Builds the fact index and runs the contradiction scan, once per store; default `model`. */
   backgroundModel?: ModelRef;
   record: PatientRecord;
+  /** Background runs of every runtime that shares it; default 16 for this runtime alone. */
+  backgroundSlots?: Slots;
+  /** Pauses before a failed background run is tried again; default 3 s, then 10 s. */
+  retryPausesMs?: readonly number[];
   /** A screen that takes longer is aborted and reported as failed. */
   timeoutMs?: number;
   log?: (message: string, error?: unknown) => void;
@@ -161,7 +171,10 @@ export class ClinicalRuntime {
   readonly #inflight = new Map<string, Promise<ScreenResponse>>();
   readonly #asking = new Map<string, Promise<Answer>>();
   #scan: Promise<Contradiction[]> | undefined;
+  /** The scan's contradictions once it has finished; screens and answers never wait for it. */
+  #scanned: Contradiction[] | undefined;
   #index: Promise<IndexedFact[]> | undefined;
+  readonly #slots: Slots;
   readonly #measurements: Measurement[];
   readonly #pressures: Measurement[];
   readonly #rules: Contradiction[];
@@ -172,12 +185,15 @@ export class ClinicalRuntime {
     private readonly options: RuntimeOptions,
     private readonly extensions: {
       screen: Extension[];
+      /** For a screen asked before the fact index is ready: the whole record, as `context` has it. */
+      screenWithoutIndex: Extension[];
       answer: Extension[];
       scan: Extension[];
       index: Extension[];
       review: Extension[];
     },
   ) {
+    this.#slots = options.backgroundSlots ?? new Slots(16);
     this.#measurements = measurements(record);
     this.#pressures = bloodPressures(record);
     this.#rules = ruleContradictions(record);
@@ -194,10 +210,12 @@ export class ClinicalRuntime {
           : retrieval === "index"
             ? [full, factIndexSection, screen]
             : [recordExtension(record, retrieval), searchExtension(record), screen],
+      screenWithoutIndex: [full, screen],
       // The whole record first, as screens and the scan have it, so the provider's cache serves it.
       answer: [full, answerExtension(record)],
       scan: [full, contradictionsExtension(record)],
-      index: [full, indexExtension(record)],
+      // Only the part's own document: a short prompt starts answering sooner.
+      index: [indexExtension(record, (documentId) => documentText(record, documentId))],
       review: [reviewExtension(record)],
     };
     const registry = createRegistry();
@@ -290,31 +308,58 @@ export class ClinicalRuntime {
     }
   }
 
-  screen(situation: string): Promise<ScreenResponse> {
+  /**
+   * Never waits for the once-per-store work: before the fact index is ready a screen reads the
+   * whole record instead, and its contradictions are the rule checks' plus whatever the scan has.
+   */
+  async screen(situation: string): Promise<ScreenResponse> {
     const text = situation.trim();
     if (text.length < 3) throw new HttpError(400, "Describe your role and task.");
     const { model, thinking, retrieval = "context" } = this.options;
-    const key = keyOf(
-      SCREEN_RULES,
-      `${model.provider}/${model.modelId}`,
-      thinking?.screen ?? "off",
-      retrieval,
-      retrieval === "index" ? `${INDEX_RULES}\n${REVIEW_RULES}\n${this.#backgroundKey}` : "",
-      text.toLowerCase().replace(/\s+/g, " "),
-    );
+    const keyFor = (used: Retrieval) =>
+      keyOf(
+        SCREEN_RULES,
+        `${model.provider}/${model.modelId}`,
+        thinking?.screen ?? "off",
+        used,
+        used === "index" ? this.#indexRequest : "",
+        normalized(text),
+      );
+    const index = retrieval === "index" ? await this.#readyIndex() : undefined;
+    let withoutIndex = retrieval === "index" && !index;
+    let key = keyFor(withoutIndex ? "context" : retrieval);
+    // A situation first asked before the index was ready keeps the screen it got then.
+    if (index && !(await this.#hasScreen(key)) && (await this.#hasScreen(keyFor("context")))) {
+      withoutIndex = true;
+      key = keyFor("context");
+    }
     const running = this.#inflight.get(key);
     if (running) return running;
-    const started = this.#screen(key, text).finally(() => this.#inflight.delete(key));
+    const extensions = withoutIndex ? this.extensions.screenWithoutIndex : this.extensions.screen;
+    const started = this.#screen(key, text, extensions, index ?? []).finally(() =>
+      this.#inflight.delete(key),
+    );
     this.#inflight.set(key, started);
     return started;
   }
 
-  async #screen(key: string, situation: string): Promise<ScreenResponse> {
+  async #hasScreen(key: string): Promise<boolean> {
+    const request = await this.harness.snapshot(ScreenRequestDoc, key, context);
+    if (!request?.conversationId) return false;
+    const conversationId = request.conversationId as ConversationId;
+    return Boolean((await this.harness.snapshot(ScreenDoc, conversationId, context))?.result);
+  }
+
+  async #screen(
+    key: string,
+    situation: string,
+    extensions: Extension[],
+    index: IndexedFact[],
+  ): Promise<ScreenResponse> {
     const startedAt = Date.now();
-    if (this.options.retrieval === "index") await this.factIndex();
     const conversationId = await this.#conversation(
       (tx) => tx.doc(ScreenRequestDoc, key, null),
-      this.extensions.screen,
+      extensions,
       this.options.thinking?.screen ?? "off",
     );
     let saved = await this.harness.snapshot(ScreenDoc, conversationId, context);
@@ -335,15 +380,10 @@ export class ClinicalRuntime {
     const request = await this.harness.snapshot(ScreenRequestDoc, key, context);
     const result = saved?.result;
     if (!result) throw new HttpError(502, "The model finished without a screen.");
-    const found = await this.#modelContradictions().catch((error: unknown) => {
-      this.options.log?.("contradiction scan failed", error);
-      return [];
-    });
-    const contradictions = mergeContradictions(this.#rules, found);
+    const contradictions = mergeContradictions(this.#rules, this.#scannedSoFar());
     const facts = result.needs.flatMap((need) => need.facts);
     const cited = new Set(facts.flatMap((f) => f.sources.map((s) => s.passageId)));
     const trends = trendsFor(this.#measurements, facts);
-    const index = this.options.retrieval === "index" ? await this.factIndex().catch(() => []) : [];
     const checks = safetyChecks(
       this.record,
       [situation, result.role, result.task].join("\n"),
@@ -464,10 +504,7 @@ export class ClinicalRuntime {
     const result = saved?.result;
     if (!result) throw new HttpError(502, "The model finished without an answer.");
     const request = await this.harness.snapshot(AnswerRequestDoc, key, context);
-    const found = await this.#modelContradictions().catch((error: unknown) => {
-      this.options.log?.("contradiction scan failed", error);
-      return [];
-    });
+    const found = this.#scannedSoFar();
     const [assessed] = assess(
       [
         {
@@ -560,11 +597,26 @@ export class ClinicalRuntime {
 
   /** The model scan's contradictions; found once per store and kept across restarts. */
   #modelContradictions(): Promise<Contradiction[]> {
-    this.#scan ??= this.#runScan().catch((error: unknown) => {
-      this.#scan = undefined;
-      throw error;
-    });
+    this.#scan ??= this.#inBackground(() => this.#runScan()).then(
+      (found) => {
+        this.#scanned = found;
+        return found;
+      },
+      (error: unknown) => {
+        this.#scan = undefined;
+        throw error;
+      },
+    );
     return this.#scan;
+  }
+
+  /** The scan's contradictions if it has finished; otherwise none yet, and the scan is started. */
+  #scannedSoFar(): Contradiction[] {
+    if (!this.#scanned)
+      void this.#modelContradictions().catch((error) =>
+        this.options.log?.("contradiction scan failed", error),
+      );
+    return this.#scanned ?? [];
   }
 
   async #runScan(): Promise<Contradiction[]> {
@@ -608,86 +660,147 @@ export class ClinicalRuntime {
     return structuredClone(result) as Contradiction[];
   }
 
-  /** Starts the once-per-store work in the background, so the first screen rarely waits for it. */
+  #inBackground<T>(run: () => Promise<T>): Promise<T> {
+    return inBackground(this.#slots, run, this.options.retryPausesMs, this.options.log);
+  }
+
+  /** Starts the once-per-store work in the background; no screen or answer waits for it. */
   prepare(log: (message: string, error?: unknown) => void): void {
     void this.#modelContradictions().catch((error) => log("contradiction scan failed", error));
     if (this.options.retrieval === "index")
       void this.factIndex().catch((error) => log("fact index failed", error));
   }
 
+  /**
+   * The reviewed index if the store has it, without waiting for one to be built; a missing index
+   * is started in the background.
+   */
+  async #readyIndex(): Promise<IndexedFact[] | undefined> {
+    const stored = await this.harness.snapshot(FactIndexDoc, context);
+    if (stored?.facts && stored.request === this.#indexRequest)
+      return structuredClone(stored.facts) as IndexedFact[];
+    void this.factIndex().catch((error) => this.options.log?.("fact index failed", error));
+    return undefined;
+  }
+
+  get #indexRequest(): string {
+    const { thinking } = this.options;
+    return `index-${keyOf(INDEX_RULES, REVIEW_RULES, this.#backgroundKey, thinking?.index ?? "", "parts")}`;
+  }
+
   /** Every fact of the record, extracted and reviewed once per store and kept across restarts. */
   factIndex(): Promise<IndexedFact[]> {
-    this.#index ??= this.#buildIndex()
-      .then((request) => this.#reviewIndex(request))
-      .catch((error: unknown) => {
-        this.#index = undefined;
-        throw error;
-      });
+    this.#index ??= this.#buildIndex().catch((error: unknown) => {
+      this.#index = undefined;
+      throw error;
+    });
     return this.#index;
   }
 
-  /** Builds the index unless the store has it; resolves with the request that identifies it. */
-  async #buildIndex(): Promise<string> {
-    const request = `index-${keyOf(INDEX_RULES, this.#backgroundKey)}`;
-    const conversationId = await this.#conversation(
-      async (tx) => {
-        const doc = await tx.doc(FactIndexDoc);
-        if (doc.request !== request)
-          Object.assign(doc, { conversationId: 0, request, attempts: 0, facts: null });
-        return doc;
-      },
-      this.extensions.index,
-      this.options.thinking?.scan ?? "medium",
-      this.#background,
+  /**
+   * Indexes and reviews every part of the record at once, then merges the parts in record order.
+   * IDs count the facts as indexed, f1, f2 and so on, so one the review removed leaves a gap. A part
+   * already done in the store is not run again.
+   */
+  async #buildIndex(): Promise<IndexedFact[]> {
+    const request = this.#indexRequest;
+    const stored = await this.harness.snapshot(FactIndexDoc, context);
+    if (stored?.facts && stored.request === request)
+      return structuredClone(stored.facts) as IndexedFact[];
+    await this.harness.commit(async (tx) => {
+      const doc = await tx.doc(FactIndexDoc);
+      if (doc.request !== request)
+        Object.assign(doc, { request, runs: {}, facts: null, corrected: 0, dropped: 0 });
+    }, context);
+    const parts = await Promise.all(
+      indexParts(this.record).map((part) =>
+        this.#inBackground(() => this.#indexPart(request, part)),
+      ),
     );
-    if ((await this.harness.snapshot(FactIndexDoc, context))?.facts) return request;
-    await this.#run(
-      conversationId,
-      "Index every clinically relevant fact of all documents and save it with submit_index.",
-      request,
-      () =>
-        this.harness.commit(async (tx) => {
-          (await tx.doc(FactIndexDoc)).conversationId = 0;
-        }, context),
-    );
-    if (!(await this.harness.snapshot(FactIndexDoc, context))?.facts)
-      throw new HttpError(502, "The fact index finished without a result.");
-    return request;
+    let offset = 0;
+    const facts = parts.flatMap((part) => {
+      const ids = part.facts.map((f) => ({ ...f, id: `f${offset + Number(f.id.slice(1))}` }));
+      offset += part.indexed;
+      return ids;
+    });
+    await this.harness.commit(async (tx) => {
+      Object.assign(await tx.doc(FactIndexDoc), {
+        facts,
+        corrected: parts.reduce((sum, part) => sum + part.corrected, 0),
+        dropped: parts.reduce((sum, part) => sum + part.dropped, 0),
+      });
+    }, context);
+    return facts;
   }
 
-  /** Checks each indexed value against its passages; corrections and removals land in the index. */
-  async #reviewIndex(indexRequest: string): Promise<IndexedFact[]> {
-    const request = `review-${keyOf(REVIEW_RULES, this.#backgroundKey, indexRequest)}`;
-    const conversationId = await this.#conversation(
+  /** One part: its index run, then a review of that run's facts against their passages. */
+  async #indexPart(
+    request: string,
+    part: IndexPart,
+  ): Promise<{ facts: IndexedFact[]; indexed: number; corrected: number; dropped: number }> {
+    const indexId = await this.#partConversation(`${part.key} index`, this.extensions.index);
+    await this.harness.commit(async (tx) => {
+      (await tx.doc(IndexPartDoc, indexId)).part ||= part.key;
+    }, context);
+    if (!(await this.harness.snapshot(IndexPartDoc, indexId, context))?.facts)
+      await this.#run(
+        indexId,
+        "Index every clinically relevant fact of your part and save it with submit_index.",
+        `${request}-${part.key}-index`,
+        () => this.#releasePart(`${part.key} index`),
+      );
+    const indexed = (await this.harness.snapshot(IndexPartDoc, indexId, context))?.facts;
+    if (!indexed) throw new HttpError(502, `The fact index of ${part.key} has no result.`);
+    if (indexed.length === 0) return { facts: [], indexed: 0, corrected: 0, dropped: 0 };
+
+    const reviewId = await this.#partConversation(`${part.key} review`, this.extensions.review);
+    await this.harness.commit(async (tx) => {
+      (await tx.doc(ReviewPartDoc, reviewId)).index ||= indexId;
+    }, context);
+    if (!(await this.harness.snapshot(ReviewPartDoc, reviewId, context))?.done)
+      await this.#run(
+        reviewId,
+        "Review every fact of the index against its passages and save your verdicts with submit_review.",
+        `${request}-${part.key}-review`,
+        () => this.#releasePart(`${part.key} review`),
+      );
+    const review = await this.harness.snapshot(ReviewPartDoc, reviewId, context);
+    const facts = (await this.harness.snapshot(IndexPartDoc, indexId, context))?.facts;
+    if (!review?.done || !facts)
+      throw new HttpError(502, `The review of ${part.key} finished without a result.`);
+    return {
+      facts: structuredClone(facts) as IndexedFact[],
+      indexed: indexed.length,
+      corrected: review.corrected,
+      dropped: review.dropped,
+    };
+  }
+
+  #partConversation(run: string, extensions: Extension[]): Promise<ConversationId> {
+    return this.#conversation(
       async (tx) => {
-        const doc = await tx.doc(FactReviewDoc);
-        if (doc.request !== request)
-          Object.assign(doc, { conversationId: 0, request, attempts: 0, done: false });
-        return doc;
+        const doc = await tx.doc(FactIndexDoc);
+        doc.runs[run] ??= { conversationId: 0 };
+        return doc.runs[run];
       },
-      this.extensions.review,
-      this.options.thinking?.scan ?? "medium",
+      extensions,
+      this.options.thinking?.index ?? this.options.thinking?.scan ?? "medium",
       this.#background,
     );
-    if (!(await this.harness.snapshot(FactReviewDoc, context))?.done)
-      await this.#run(
-        conversationId,
-        "Review every fact of the index against its passages and save your verdicts with submit_review.",
-        request,
-        () =>
-          this.harness.commit(async (tx) => {
-            (await tx.doc(FactReviewDoc)).conversationId = 0;
-          }, context),
-      );
-    const facts = (await this.harness.snapshot(FactIndexDoc, context))?.facts;
-    if (!facts) throw new HttpError(502, "The fact index is missing after its review.");
-    return structuredClone(facts) as IndexedFact[];
+  }
+
+  /** A failed run starts in a fresh conversation next time. */
+  #releasePart(run: string): Promise<void> {
+    return this.harness.commit(async (tx) => {
+      const doc = await tx.doc(FactIndexDoc);
+      if (doc.runs[run]) doc.runs[run].conversationId = 0;
+    }, context);
   }
 
   /** How the review changed the index, for the eval. */
   async indexReview(): Promise<{ corrected: number; dropped: number } | undefined> {
-    const review = await this.harness.snapshot(FactReviewDoc, context);
-    return review?.done ? { corrected: review.corrected, dropped: review.dropped } : undefined;
+    const doc = await this.harness.snapshot(FactIndexDoc, context);
+    return doc?.facts ? { corrected: doc.corrected, dropped: doc.dropped } : undefined;
   }
 
   close(): Promise<void> {

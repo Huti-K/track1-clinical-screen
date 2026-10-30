@@ -92,6 +92,19 @@ function recordText(record: PatientRecord, retrieval: Retrieval): string {
   ].join("\n");
 }
 
+/** One document with the patient header, for a run that reads only that document. */
+export function documentText(record: PatientRecord, documentId: string): string {
+  const doc = record.document(documentId);
+  if (!doc) return "";
+  return [
+    ...recordHeader(record),
+    "Every line below is one passage: [passage ID] text. Cite passages by their ID.",
+    "",
+    documentLine(doc),
+    ...doc.passages.map((p) => `[${p.id}] ${p.text}`),
+  ].join("\n");
+}
+
 /** The record as the first prompt section: identical for every conversation, so providers cache it. */
 export function recordExtension(record: PatientRecord, retrieval: Retrieval = "context") {
   const text = recordText(record, retrieval);

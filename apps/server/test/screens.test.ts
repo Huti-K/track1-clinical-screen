@@ -127,34 +127,58 @@ const INDEX: JsonObject = {
   ],
 };
 
-/** The review of INDEX: f2 is corrected, f3 has no support and leaves the index. */
-const REVIEW: JsonObject = {
-  reviews: [
-    { id: "f1", verdict: "supported" },
-    { id: "f2", verdict: "corrected", value: "100 mg orally, 1-0-0" },
-    { id: "f3", verdict: "unsupported" },
-    ...["f4", "f5", "f6", "f7"].map((id) => ({ id, verdict: "supported" })),
-  ],
+/** The review of INDEX by label: the aspirin is corrected, the BMI has no support and leaves the index. */
+const REVIEW: Record<string, JsonObject> = {
+  "Aspirin (Thrombo ASS)": { verdict: "corrected", value: "100 mg orally, 1-0-0" },
+  BMI: { verdict: "unsupported" },
 };
+
+/** The INDEX facts of the part the prompt names, as a model indexing only that part would give. */
+function indexOfPart(prompt: string): JsonObject {
+  const documentId = /Your part: passages (\w+)-\d+ to/.exec(prompt)?.[1];
+  const facts = (INDEX.facts as JsonObject[]).filter((fact) =>
+    (fact.sources as JsonObject[]).some((s) => String(s.passage).startsWith(`${documentId}-`)),
+  );
+  return { facts };
+}
+
+/** A verdict for every fact the review prompt lists, from REVIEW or else supported. */
+function reviewOf(prompt: string): JsonObject {
+  const listed = [...prompt.matchAll(/\[(f\d+)\] \w+ [\d-]+ \| ([^|]+?) \|/g)];
+  return {
+    reviews: listed.map(([, id = "", label = ""]) => ({
+      id,
+      ...(REVIEW[label] ?? { verdict: "supported" }),
+    })),
+  };
+}
 
 type Script = (attempt: number) => JsonObject;
 
 /**
  * Answers like a model would: the index builder gets INDEX, its review REVIEW, the contradiction
  * scan its report, a screen gets `screen(attempt)` and a follow-up question `answer(attempt)`.
+ * The index and the scan answer only once `held` settles.
  */
-function scriptedModels(screen: Script, answer?: Script) {
+function scriptedModels(screen: Script, answer?: Script, held?: Promise<void>) {
   const faux = fauxProvider({ provider: "faux", models: [{ id: "clinic-1" }] });
-  const respond: FauxResponseFactory = (context) => {
+  const respond: FauxResponseFactory = async (context) => {
     const tools = getCurrentTools(context.messages).map((tool) => tool.name);
+    if (["report_contradictions", "submit_index", "submit_review"].some((t) => tools.includes(t)))
+      await held;
     if (tools.includes("report_contradictions"))
       return fauxAssistantMessage(fauxToolCall("report_contradictions", BMI_CONTRADICTION), {
         stopReason: "toolUse",
       });
+    const prompt = JSON.stringify(context.messages);
     if (tools.includes("submit_index"))
-      return fauxAssistantMessage(fauxToolCall("submit_index", INDEX), { stopReason: "toolUse" });
+      return fauxAssistantMessage(fauxToolCall("submit_index", indexOfPart(prompt)), {
+        stopReason: "toolUse",
+      });
     if (tools.includes("submit_review"))
-      return fauxAssistantMessage(fauxToolCall("submit_review", REVIEW), { stopReason: "toolUse" });
+      return fauxAssistantMessage(fauxToolCall("submit_review", reviewOf(prompt)), {
+        stopReason: "toolUse",
+      });
     const attempt = context.messages.filter((m) => m.role === "toolResult").length + 1;
     if (tools.includes("submit_answer") && answer)
       return fauxAssistantMessage(fauxToolCall("submit_answer", answer(attempt)), {
@@ -182,16 +206,20 @@ async function start(
   screen: Script,
   retrieval: "context" | "index" = "context",
   answer?: Script,
+  held?: Promise<void>,
 ) {
   const runtime = await ClinicalRuntime.open({
     storage,
-    models: scriptedModels(screen, answer),
+    models: scriptedModels(screen, answer, held),
     model: { provider: "faux", modelId: "clinic-1" },
     record: await loadPatientRecord(FIXTURE),
     retrieval,
   });
   const app = await buildApp([runtime]);
   open.push({ app, runtime });
+  // The overview waits for the index and the scan, as a clinician's first screen no longer does.
+  if (retrieval === "index" && !held)
+    expect((await app.inject({ method: "GET", url: `${PATIENT}/overview` })).statusCode).toBe(200);
   return app;
 }
 
@@ -326,6 +354,52 @@ describe("POST /api/patients/:patientId/screens", () => {
       schedule: "1-0-0",
     });
     expect(aspirin).not.toHaveProperty("detail");
+  });
+
+  it("serves a screen from the whole record while the index and the scan are still running, and keeps it", async () => {
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const app = await start(
+      new MemoryStorage(),
+      () => ({
+        role: "Anaesthetist",
+        task: "Pre-operative check",
+        needs: [
+          {
+            title: "Blood thinners",
+            status: "documented",
+            factIds: ["f1"],
+            facts: [
+              {
+                label: "Aspirin",
+                value: "Aspirin 100 mg daily",
+                sources: [{ passage: "D1-9", quote: "Thrombo ASS 100mg" }],
+              },
+            ],
+          },
+        ],
+      }),
+      "index",
+      undefined,
+      held,
+    );
+
+    // Held, the index and the scan would make the old screen wait forever.
+    const { screen } = await postScreen(app);
+
+    // The model's own fact rather than an index pick: there is no index yet.
+    expect(screen.needs[0]?.facts.map((f) => [f.value, f.sources[0]?.passageId])).toEqual([
+      ["Aspirin 100 mg daily", "D1-9"],
+    ]);
+    release();
+    expect((await app.inject({ method: "GET", url: `${PATIENT}/overview` })).statusCode).toBe(200);
+
+    // Asked again once the index is ready, the situation keeps the screen it got.
+    const again = await postScreen(app);
+    expect(again.cached).toBe(true);
+    expect(again.screen.needs[0]?.facts.map((f) => f.value)).toEqual(["Aspirin 100 mg daily"]);
   });
 
   it("keeps the occasion and the detail, date and drug parts of a fact the screen writes", async () => {

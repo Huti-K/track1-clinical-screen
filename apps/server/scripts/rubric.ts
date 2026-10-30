@@ -34,7 +34,8 @@ export function screenText(screen: ScreenResponse["screen"]): string {
     .flatMap((need) => [
       need.title,
       need.note ?? "",
-      ...need.facts.flatMap((f) => [f.label, f.value, f.detail ?? ""]),
+      // The date too: the screen shows it in its own column, such as a planned operation's day.
+      ...need.facts.flatMap((f) => [f.label, f.value, f.detail ?? "", f.date ?? ""]),
     ])
     .join("\n");
 }

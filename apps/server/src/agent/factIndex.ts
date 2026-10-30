@@ -87,27 +87,64 @@ export function factText(fact: Pick<Fact, "value" | "detail" | "drug">): string 
   return `${fact.value}${fact.detail ? ` — ${fact.detail}` : ""}${drug}`;
 }
 
+/** At most this many passages go to one index run; the runs go in parallel, so smaller is faster. */
+const PART_PASSAGES = 40;
+
+/** A run of passages of one document that one model run indexes and another reviews. */
+export type IndexPart = { key: string; documentId: string; passageIds: string[] };
+
+/** The record cut into parts of at most PART_PASSAGES passages, each document into even ones. */
+export function indexParts(record: PatientRecord): IndexPart[] {
+  return record.documents.flatMap((doc) => {
+    const count = Math.ceil(doc.passages.length / PART_PASSAGES);
+    const size = Math.ceil(doc.passages.length / Math.max(count, 1));
+    return Array.from({ length: count }, (_, i) => ({
+      key: `${doc.id}/${i + 1}`,
+      documentId: doc.id,
+      passageIds: doc.passages.slice(i * size, (i + 1) * size).map((p) => p.id),
+    })).filter((part) => part.passageIds.length > 0);
+  });
+}
+
 /**
- * Every fact of the record, extracted once per store with its sources checked. Screens pick from
- * it by ID instead of writing each fact out, which is most of a screen's output.
+ * Every fact of the record, extracted and reviewed once per store with its sources checked, merged
+ * from its parts. Screens pick from it by ID instead of writing each fact out, which is most of a
+ * screen's output; `facts` stays null until every part is reviewed.
  */
 export const FactIndexDoc = defineDoc<{
-  conversationId: number;
-  /** The prompt and model that built it; a change builds it again. */
+  /** The prompts and model that built it; a change builds it again. */
   request: string;
-  attempts: number;
+  /** Per part and step, such as `D1/1 index`: the conversation that runs it. */
+  runs: Record<string, { conversationId: number }>;
   facts: IndexedFact[] | null;
+  corrected: number;
+  dropped: number;
 }>({
-  kind: "track1.fact-index",
+  kind: "track1.fact-index-parts",
   version: 1,
   scope: "session",
-  initial: () => ({ conversationId: 0, request: "", attempts: 0, facts: null }),
+  initial: () => ({ request: "", runs: {}, facts: null, corrected: 0, dropped: 0 }),
   checkpointWhen: () => true,
 });
 
-export const INDEX_RULES = `You build an index of every clinically relevant fact in this patient's documents, so that later screens can pick facts from it instead of reading the documents again.
+/** One part's index run: the part it covers and, once saved, its facts with part-local IDs. */
+export const IndexPartDoc = defineDoc<{
+  part: string;
+  attempts: number;
+  facts: IndexedFact[] | null;
+}>({
+  kind: "track1.index-part",
+  version: 1,
+  scope: "conversation",
+  history: "latest",
+  fork: "initial",
+  initial: () => ({ part: "", attempts: 0, facts: null }),
+  checkpointWhen: () => true,
+});
 
-Go through every document and every passage. Categories:
+export const INDEX_RULES = `You build an index of every clinically relevant fact in a part of this patient's documents, so that later screens can pick facts from it instead of reading the documents again.
+
+Go through every passage of the part you are given; the rest of its document is there for context only. Categories:
 - diagnosis: diagnoses with their status (current, suspected, ruled out, past), histology, stage, receptor status and other markers;
 - medication: one entry per drug and document, with dose, route and schedule written morning-midday-evening, so the table row "1 0 1 0" is 1-0-1, and its parts in drug;
 - allergy: one entry per agent, with the agent as the value, such as "Contrast media", and the reaction it caused as the detail;
@@ -119,7 +156,7 @@ Go through every document and every passage. Categories:
 
 Each fact has its category, a label of at most 2 words, a value, a detail and the date it refers to (YYYY-MM-DD, the document's date when the passage gives none). Write like a clinician's chart, with the standard abbreviations such as HbA1c, LVEF, BP, HR, BMI, eGFR, ECG, TTE, HTN, T2DM, OSA, GERD and SLE instead of their full terms. The value is the answer in at most 4 words, such as "60 %", "Grade II", "Left" or "Aspirin 100 mg"; the detail says what qualifies it in at most 6 words, such as "TTE, normal systolic" or "1-0-0, oral", and stays empty when there is nothing to add. When the answer is a number, the value is the number with what it measures, such as "LVEF 60 %" or "HbA1c 7.2 %". A medication fact also has drug: the generic name in English, the brand as written, the dose of one intake, the schedule and the route. A value repeated in another document gets its own entry with that date; never merge different dates. Each source is a passage ID and a short verbatim quote of that passage; every claim in a value, detail or drug part needs a quote that says it. Translate German terms and add generic names to brand names, but never add anything the passage does not say. Skip addresses, signatures and empty headings.
 
-Call submit_index once with all facts. Do not answer in text.`;
+Call submit_index once with all facts of the part, or with an empty list if it has none. Do not answer in text.`;
 
 const IndexArgs = Type.Object({
   facts: Type.Array(
@@ -134,12 +171,19 @@ const IndexArgs = Type.Object({
       drug: Type.Optional(DrugParts),
       sources: Type.Array(Cited, { minItems: 1 }),
     }),
-    { minItems: 1 },
   ),
 });
 type IndexArgs = Static<typeof IndexArgs>;
 
-export function indexExtension(record: PatientRecord) {
+/**
+ * Indexes the part its conversation's IndexPartDoc names; `documentText` renders that part's
+ * document as the prompt shows it.
+ */
+export function indexExtension(
+  record: PatientRecord,
+  documentText: (documentId: string) => string,
+) {
+  const parts = new Map(indexParts(record).map((part) => [part.key, part]));
   const submitIndex = defineTool({
     name: "submit_index",
     description:
@@ -148,11 +192,16 @@ export function indexExtension(record: PatientRecord) {
     replay: "safe",
     prepareArguments: (args) => parseArrays<IndexArgs>(args, ["facts"]),
     execute: async (args, api, context) => {
-      const attempts = ((await api.snapshot(FactIndexDoc, context))?.attempts ?? 0) + 1;
+      const saved = await api.snapshot(IndexPartDoc, api.conversationId, context);
+      const attempts = (saved?.attempts ?? 0) + 1;
+      const covered = new Set(parts.get(saved?.part ?? "")?.passageIds);
       const problems: string[] = [];
       const facts: IndexedFact[] = [];
       for (const fact of args.facts) {
-        const checked = verify(record, fact.sources, `"${fact.label}" (${fact.date})`);
+        const name = `"${fact.label}" (${fact.date})`;
+        const checked = verify(record, fact.sources, name);
+        if (!checked.sources.some((s) => covered.has(s.passageId)))
+          checked.problems.push(`${name} cites none of the passages of your part.`);
         problems.push(...checked.problems);
         if (checked.problems.length === 0)
           facts.push({
@@ -166,7 +215,7 @@ export function indexExtension(record: PatientRecord) {
       }
       const accept = problems.length === 0 || attempts >= MAX_ATTEMPTS;
       await api.commit(async (tx) => {
-        const doc = await tx.doc(FactIndexDoc);
+        const doc = await tx.doc(IndexPartDoc, api.conversationId);
         doc.attempts = attempts;
         if (accept) doc.facts = facts;
       }, context);
@@ -177,11 +226,23 @@ export function indexExtension(record: PatientRecord) {
   return defineExtension({
     name: "fact-index-builder",
     tools: [submitIndex],
-    sections: [section("index_rules", () => INDEX_RULES)],
+    sections: [
+      section("index_rules", () => INDEX_RULES),
+      section("part", async (input, context) => {
+        const key = (await input.read.snapshot(IndexPartDoc, input.conversationId, context))?.part;
+        const part = parts.get(key ?? "");
+        if (!part) return undefined;
+        return [
+          documentText(part.documentId),
+          "",
+          `Your part: passages ${part.passageIds[0]} to ${part.passageIds.at(-1)}.`,
+        ].join("\n");
+      }),
+    ],
     hooks: [
       hook(GenerationTask, {
         onYield: async (_answer, api, context) =>
-          (await api.snapshot(FactIndexDoc, context))?.facts
+          (await api.snapshot(IndexPartDoc, api.conversationId, context))?.facts
             ? undefined
             : { continue: "Call submit_index now. Do not answer in text." },
       }),
@@ -205,27 +266,21 @@ function indexText(facts: readonly IndexedFact[]): string {
   ].join("\n");
 }
 
-/** The review of the index: whether each value says only what its passages say. */
-export const FactReviewDoc = defineDoc<{
-  conversationId: number;
-  /** The index request and review prompt it checked; a change reviews again. */
-  request: string;
+/** One part's review: whether each value of that part's index says only what its passages say. */
+export const ReviewPartDoc = defineDoc<{
+  /** The conversation of the index run it reviews. */
+  index: number;
   attempts: number;
   done: boolean;
   corrected: number;
   dropped: number;
 }>({
-  kind: "track1.fact-review",
+  kind: "track1.review-part",
   version: 1,
-  scope: "session",
-  initial: () => ({
-    conversationId: 0,
-    request: "",
-    attempts: 0,
-    done: false,
-    corrected: 0,
-    dropped: 0,
-  }),
+  scope: "conversation",
+  history: "latest",
+  fork: "initial",
+  initial: () => ({ index: 0, attempts: 0, done: false, corrected: 0, dropped: 0 }),
   checkpointWhen: () => true,
 });
 
@@ -286,8 +341,10 @@ export function reviewExtension(record: PatientRecord) {
     replay: "safe",
     prepareArguments: (args) => parseArrays<ReviewArgs>(args, ["reviews"]),
     execute: async (args, api, context) => {
-      const attempts = ((await api.snapshot(FactReviewDoc, context))?.attempts ?? 0) + 1;
-      const facts = (await api.snapshot(FactIndexDoc, context))?.facts ?? [];
+      const saved = await api.snapshot(ReviewPartDoc, api.conversationId, context);
+      const attempts = (saved?.attempts ?? 0) + 1;
+      const indexId = (saved?.index ?? 0) as typeof api.conversationId;
+      const facts = (await api.snapshot(IndexPartDoc, indexId, context))?.facts ?? [];
       const verdicts = new Map(args.reviews.map((r) => [r.id.trim(), r]));
       const problems = [
         ...facts.filter((f) => !verdicts.has(f.id)).map((f) => `No verdict for ${f.id}.`),
@@ -297,7 +354,7 @@ export function reviewExtension(record: PatientRecord) {
       ];
       const accept = problems.length === 0 || attempts >= MAX_ATTEMPTS;
       await api.commit(async (tx) => {
-        const review = await tx.doc(FactReviewDoc);
+        const review = await tx.doc(ReviewPartDoc, api.conversationId);
         review.attempts = attempts;
         if (!accept) return;
         // A fact without a verdict after the last attempt stays as it was.
@@ -313,7 +370,7 @@ export function reviewExtension(record: PatientRecord) {
           corrected: args.reviews.filter((r) => r.verdict === "corrected").length,
           dropped: facts.length - kept.length,
         });
-        (await tx.doc(FactIndexDoc)).facts = kept;
+        (await tx.doc(IndexPartDoc, indexId)).facts = kept;
       }, context);
       if (!accept)
         return {
@@ -334,14 +391,16 @@ export function reviewExtension(record: PatientRecord) {
     sections: [
       section("review_rules", () => REVIEW_RULES),
       section("facts_to_review", async (input, context) => {
-        const facts = (await input.read.snapshot(FactIndexDoc, context))?.facts;
+        const review = await input.read.snapshot(ReviewPartDoc, input.conversationId, context);
+        const indexId = (review?.index ?? 0) as typeof input.conversationId;
+        const facts = (await input.read.snapshot(IndexPartDoc, indexId, context))?.facts;
         return facts ? reviewText(record, facts) : undefined;
       }),
     ],
     hooks: [
       hook(GenerationTask, {
         onYield: async (_answer, api, context) =>
-          (await api.snapshot(FactReviewDoc, context))?.done
+          (await api.snapshot(ReviewPartDoc, api.conversationId, context))?.done
             ? undefined
             : { continue: "Call submit_review now. Do not answer in text." },
       }),
