@@ -75,7 +75,7 @@ Measured with `pnpm eval --set all` on 30 October 2026, on a fresh store with th
 | Load time, slowest of the 5    | 4.9 s                                                                                                                      | under 10 s |
 
 What does not work yet:
-- **2.3, the date of the planned operation.** The screen shows "Quadrantectomy and IORT" with its date in the date column, but that column shows month and year only (05/16), not the day, 16 May 2016.
-- **3.3, the weight change.** The screen shows 66 kg and a loss of 12 kg since June 2015, but not the 78 kg and 67 kg it was computed from.
+- **2.3, the date of the planned operation.** The screen shows the operation with its date in the date column, but that column shows month and year only, not the day.
+- **3.3, the weight change.** The screen shows the latest weight and the total loss, but not every earlier weight the loss was computed from.
 - **The first screen right after the first start** reads the whole record while the fact index is being built (about 20 s per patient) and takes 9–16 s. Every screen after that takes 4–5 s, and a repeated situation is served from the store.
 - Across runs the model picks slightly different facts: an earlier run with high reasoning for the index scored 14 of 15, and six of the seven benchmark runs before the parallel index scored 33 of 33 on the five situations and six held-out ones.
