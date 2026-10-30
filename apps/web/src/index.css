@@ -1,10 +1,10 @@
 @import "tailwindcss";
-@import "@fontsource-variable/geist";
+@import "@fontsource-variable/figtree";
 @import "@fontsource-variable/geist-mono";
 
 /*
- * Marlene's design language without its private UI kit: structure from whitespace and surface
- * tone, no borders or shadows at rest, colour only where it means something.
+ * CARE HMIS's look (ohcnetwork/care_fe): Figtree, its green primary, purple-grey text on a gray-100
+ * frame, white cards with a hairline border and a soft shadow, colour only where it means something.
  */
 
 @custom-variant dark (&:is(.dark *));
@@ -15,25 +15,25 @@
  */
 :root {
   color-scheme: light;
-  --chrome: oklch(0.975 0.004 250);
-  --recessed: oklch(0.962 0.004 250);
-  --surface: oklch(1 0.002 250);
-  --surface-2: oklch(0.952 0.004 250);
-  --hover: oklch(0.922 0.004 250);
-  --foreground: oklch(0.29 0.016 250);
-  --muted-foreground: oklch(0.5 0.018 250);
-  --accent: oklch(0.52 0.13 245);
-  --accent-foreground: oklch(0.99 0.003 245);
-  --accent-text: oklch(0.52 0.13 245);
-  --accent-wash: color-mix(in oklch, var(--accent) 12%, transparent);
+  --chrome: #f3f4f6;
+  --recessed: #f9fafb;
+  --surface: #ffffff;
+  --surface-2: #f7f5fa;
+  --hover: #f1edf7;
+  --foreground: #453c52;
+  --muted-foreground: #6a5f7a;
+  --accent: #046c4e;
+  --accent-foreground: #ffffff;
+  --accent-text: #057a55;
+  --accent-wash: color-mix(in oklch, #0d9f6e 14%, transparent);
   --success: oklch(0.5 0.12 240);
   --warning: oklch(0.56 0.13 70);
   --warning-wash: oklch(0.96 0.04 70);
   --destructive: oklch(0.5 0.15 350);
   --destructive-wash: oklch(0.96 0.03 350);
-  --border: color-mix(in oklch, var(--foreground) 12%, transparent);
+  --border: #e5e7eb;
   --selection: color-mix(in oklch, var(--accent) 22%, transparent);
-  --radius: 0.7rem;
+  --radius: 0.5rem;
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
 }
 
@@ -46,9 +46,10 @@
   --hover: oklch(0.32 0.006 250);
   --foreground: oklch(0.875 0.02 250);
   --muted-foreground: oklch(0.71 0.022 250);
-  --accent: oklch(0.72 0.12 240);
-  --accent-foreground: oklch(0.24 0.01 245);
-  --accent-text: oklch(0.72 0.12 240);
+  --accent: #31c48d;
+  --accent-foreground: #014737;
+  --accent-text: #31c48d;
+  --border: color-mix(in oklch, var(--foreground) 12%, transparent);
   --success: oklch(0.76 0.11 235);
   --warning: oklch(0.78 0.15 75);
   --warning-wash: oklch(0.3 0.05 75);
@@ -57,7 +58,7 @@
 }
 
 @theme inline {
-  --font-sans: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Figtree Variable", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "Geist Mono Variable", ui-monospace, monospace;
   /* The source letters are set the way the hospital prints them. */
   --font-paper: Arial, "Helvetica Neue", Helvetica, "Liberation Sans", sans-serif;
@@ -86,14 +87,6 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
-
-  --shadow-2xs: 0 0 #0000;
-  --shadow-xs: 0 0 #0000;
-  --shadow-sm: 0 0 #0000;
-  --shadow-md: 0 0 #0000;
-  --shadow-lg: 0 0 #0000;
-  --shadow-xl: 0 0 #0000;
-  --shadow-2xl: 0 0 #0000;
 
   /* A cited passage's highlight fades in once the letter has scrolled to it. */
   --animate-paper-cite: paper-cite 900ms var(--ease) both;

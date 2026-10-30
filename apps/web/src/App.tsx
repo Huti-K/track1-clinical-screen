@@ -352,7 +352,7 @@ function Workspace({ auth, onAuth }: { auth: AuthStatus; onAuth: (auth: AuthStat
               <Brand />
             </button>
           </header>
-          <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden bg-surface lg:mr-3 lg:rounded-2xl">
+          <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden bg-surface lg:mr-3 lg:rounded-xl lg:border lg:border-border lg:shadow-sm">
             {/* A screen lays out and scrolls its own columns; the other pages scroll as one. */}
             <div
               className={`@container min-w-0 flex-1 overflow-y-auto ${showResult ? "" : "px-4 py-8 [scrollbar-gutter:stable] sm:px-10 lg:px-14"}`}
